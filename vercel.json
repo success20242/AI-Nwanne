@@ -1,8 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/telegram.js": { "runtime": "nodejs18.x" },
-    "api/facebook.js": { "runtime": "nodejs18.x" },
-    "api/cron-post.js": { "runtime": "nodejs18.x" }
-  }
+  "version": 2
 }
