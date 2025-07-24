@@ -1,0 +1,17 @@
+# Node modules folder
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+
+# Next.js build output
+.next/
+out/
+
+# Optional Mac system files
+.DS_Store
