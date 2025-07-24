@@ -10,6 +10,9 @@
     "post": "node api/cron-post.js"
   },
   "dependencies": {
+    "next": "^15.4.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "axios": "^1.6.5",
     "dotenv": "^16.3.1",
     "node-fetch": "^3.3.2",
