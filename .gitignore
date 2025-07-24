@@ -19,3 +19,4 @@ out/
 =======
 .vercel
 >>>>>>> a9c06db (Added Node.js version to package.json)
+node_modules/
