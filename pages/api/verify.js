@@ -9,22 +9,24 @@ export default function handler(req, res) {
     if (mode && token) {
       if (mode === "subscribe" && token === VERIFY_TOKEN) {
         console.log("WEBHOOK_VERIFIED ✅");
-        return res.status(200).send(challenge);
+        res.status(200).send(challenge);
+        return; // ✅ just end here without returning a value
       } else {
-        return res.status(403).end();
+        res.status(403).end();
+        return;
       }
     } else {
-      return res.status(400).end();
+      res.status(400).end();
+      return;
     }
   }
 
   if (req.method === "POST") {
     const body = req.body;
-
     console.log("📥 Received event:", JSON.stringify(body, null, 2));
 
-    // Your logic here
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   res.setHeader("Allow", ["GET", "POST"]);
