@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "vercel dev",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "vercel-dev": "vercel dev",
     "post": "node api/cron-post.js"
   },
   "dependencies": {
