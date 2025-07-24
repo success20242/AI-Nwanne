@@ -1,7 +1,7 @@
-import { askAI } from "../lib/ai.js";
-// import { generateVoice } from "../lib/tts.js";
-// import { sendTelegramVoice } from "../utils/sendVoice.js";
-import { detectLang, langToCode } from "../lib/detectLang.js";
+import { askAI } from "../../lib/ai.js";
+// import { generateVoice } from "../../lib/tts.js";
+// import { sendTelegramVoice } from "../../utils/sendVoice.js";
+import { detectLang, langToCode } from "../../lib/detectLang.js";
 
 export default async function handler(req, res) {
   const msg = req.body.message?.text;
