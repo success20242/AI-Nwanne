@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/telegram.js": { "runtime": "nodejs20.x" },
+    "api/facebook.js": { "runtime": "nodejs20.x" },
+    "api/cron-post.js": { "runtime": "nodejs20.x", "schedule": "0 6 * * *" }
+  }
+}
