@@ -1,0 +1,16 @@
+{
+  "name": "ai-nwanne",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "vercel dev",
+    "post": "node api/cron-post.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.5",
+    "dotenv": "^16.3.1",
+    "gtts": "^2.0.2",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.24.1"
+  }
+}
