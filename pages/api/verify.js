@@ -10,16 +10,25 @@ export default function handler(req, res) {
 
     if (mode && token) {
       if (mode === "subscribe" && token === VERIFY_TOKEN) {
-        console.log("WEBHOOK_VERIFIED");
-        res.status(200).send(challenge);
+        console.log("WEBHOOK_VERIFIED ✅");
+        return res.status(200).send(challenge);
       } else {
-        res.sendStatus(403);
+        return res.sendStatus(403);
       }
     } else {
-      res.sendStatus(400);
+      return res.sendStatus(400);
     }
-  } else {
-    res.setHeader("Allow", ["GET"]);
-    res.status(405).end(`Method ${req.method} Not Allowed`);
   }
+
+  if (req.method === "POST") {
+    const body = req.body;
+
+    console.log("📥 Received event:", JSON.stringify(body, null, 2));
+
+    // Optionally respond to the user here or pass to another handler
+    return res.sendStatus(200);
+  }
+
+  res.setHeader("Allow", ["GET", "POST"]);
+  res.status(405).end(`Method ${req.method} Not Allowed`);
 }
