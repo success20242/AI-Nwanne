@@ -1,5 +1,3 @@
-// pages/api/verify.js
-
 export default function handler(req, res) {
   const VERIFY_TOKEN = "TEST_CHALLENGE";
 
@@ -13,10 +11,10 @@ export default function handler(req, res) {
         console.log("WEBHOOK_VERIFIED ✅");
         return res.status(200).send(challenge);
       } else {
-        return res.sendStatus(403);
+        return res.status(403).end();
       }
     } else {
-      return res.sendStatus(400);
+      return res.status(400).end();
     }
   }
 
@@ -25,8 +23,8 @@ export default function handler(req, res) {
 
     console.log("📥 Received event:", JSON.stringify(body, null, 2));
 
-    // Optionally respond to the user here or pass to another handler
-    return res.sendStatus(200);
+    // Your logic here
+    return res.status(200).end();
   }
 
   res.setHeader("Allow", ["GET", "POST"]);
