@@ -1,8 +1,8 @@
-import { askAI } from "../lib/ai.js";
-// import { generateVoice } from "../lib/tts.js";
+import { askAI } from "../../lib/ai.js";
+// import { generateVoice } from "../../lib/tts.js";
 import fs from "fs";
 import axios from "axios";
-import { detectLang, langToCode } from "../lib/detectLang.js";
+import { detectLang, langToCode } from "../../lib/detectLang.js";
 
 export default async function handler(req, res) {
   // ===== Webhook verification (GET) =====
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       {
         messaging_type: "RESPONSE",
         recipient: { id: senderId },
-        message: { text: answer }
+        message: { text: answer },
       }
     );
 
@@ -67,9 +67,9 @@ export default async function handler(req, res) {
         message: {
           attachment: {
             type: "audio",
-            payload: { attachment_id }
-          }
-        }
+            payload: { attachment_id },
+          },
+        },
       }
     );
     */
