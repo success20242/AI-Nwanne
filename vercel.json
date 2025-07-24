@@ -1,7 +1,14 @@
 {
   "functions": {
-    "api/telegram.js": { "runtime": "nodejs20.x" },
-    "api/facebook.js": { "runtime": "nodejs20.x" },
-    "api/cron-post.js": { "runtime": "nodejs20.x" }
+    "api/telegram.js": {
+      "runtime": "nodejs"
+    },
+    "api/facebook.js": {
+      "runtime": "nodejs"
+    },
+    "api/cron-post.js": {
+      "runtime": "nodejs",
+      "regions": ["iad1"]
+    }
   }
 }
