@@ -10,14 +10,15 @@ export default function handler(req, res) {
 
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
       console.log("WEBHOOK_VERIFIED");
-      res.status(200).send(challenge);
+      return res.status(200).send(challenge);
     } else {
-      res.sendStatus(403);
+      return res.sendStatus(403);
     }
   } else if (req.method === "POST") {
     console.log("Received webhook:", req.body);
-    res.sendStatus(200);
+    return res.sendStatus(200);
   } else {
-    res.sendStatus(405); // Method Not Allowed
+    // Unsupported HTTP method
+    return res.sendStatus(405);
   }
 }
