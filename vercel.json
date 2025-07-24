@@ -1,14 +1,9 @@
 {
-  "functions": {
-    "api/telegram.js": {
-      "runtime": "nodejs"
-    },
-    "api/facebook.js": {
-      "runtime": "nodejs"
-    },
-    "api/cron-post.js": {
-      "runtime": "nodejs",
-      "regions": ["iad1"]
+  "version": 3,
+  "crons": [
+    {
+      "path": "/api/cron-post",
+      "schedule": "0 6 * * *"
     }
-  }
+  ]
 }
