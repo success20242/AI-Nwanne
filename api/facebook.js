@@ -1,5 +1,5 @@
 import { askAI } from "../lib/ai.js";
-import { generateVoice } from "../lib/tts.js";
+// import { generateVoice } from "../lib/tts.js";
 import fs from "fs";
 import axios from "axios";
 import { detectLang, langToCode } from "../lib/detectLang.js";
@@ -15,8 +15,8 @@ export default async function handler(req, res) {
   const lang = detectLang(text);
   const answer = await askAI(text, lang);
   const langCode = langToCode(lang);
-  const file = `/tmp/fbvoice.mp3`;
-  await generateVoice(answer, langCode, file);
+  // const file = `/tmp/fbvoice.mp3`;
+  // await generateVoice(answer, langCode, file);
 
   // Send text reply
   await axios.post(
@@ -28,6 +28,7 @@ export default async function handler(req, res) {
     }
   );
 
+  /*
   // Upload voice note
   const form = new FormData();
   form.append("filedata", fs.createReadStream(file));
@@ -53,6 +54,7 @@ export default async function handler(req, res) {
       }
     }
   );
+  */
 
   res.end("OK");
 }
