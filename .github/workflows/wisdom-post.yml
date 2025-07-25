@@ -1,30 +1,31 @@
-name: Daily Wisdom Auto Post
+name: Auto Post Wisdom
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # Adjust time as needed (runs at 5:00 AM UTC daily)
-  workflow_dispatch:      # Manual trigger option
+    - cron: '0 */6 * * *' # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+  workflow_dispatch: # Allows manual trigger from GitHub
 
 jobs:
-  autopost:
+  post-to-facebook:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '20'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Run Wisdom Poster
-        run: node scripts/autoPoster.js
+      - name: Run Auto Poster Script
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node scripts/autoPoster.js
