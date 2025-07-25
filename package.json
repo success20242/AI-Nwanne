@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "vercel-dev": "vercel dev",
-    "post": "node api/cron-post.js"
+    "post": "node api/cron-post.js",
+    "post-wisdom": "node scripts/autoPoster.js"
   },
   "dependencies": {
     "axios": "^1.6.5",
