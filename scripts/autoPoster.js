@@ -6,8 +6,22 @@ import 'dotenv/config';
 const LANGUAGES = ["english", "igbo", "hausa", "yoruba"];
 const INTERVAL_HOURS = 6;
 const LOG_FILE = './posted_wisdom.json';
+const INDEX_FILE = './current_index.json';
 
 let currentIndex = 0;
+
+// Load currentIndex from file or initialize to 0
+if (fs.existsSync(INDEX_FILE)) {
+  try {
+    const data = fs.readFileSync(INDEX_FILE, 'utf-8');
+    const obj = JSON.parse(data);
+    if (typeof obj.currentIndex === 'number' && obj.currentIndex >= 0 && obj.currentIndex < LANGUAGES.length) {
+      currentIndex = obj.currentIndex;
+    }
+  } catch (e) {
+    console.error("⚠️ Failed to parse currentIndex file, starting at 0.");
+  }
+}
 
 // Load previously posted wisdoms from file or initialize empty
 let postedWisdoms = [];
@@ -23,6 +37,10 @@ if (fs.existsSync(LOG_FILE)) {
 function saveWisdomLog(wisdom) {
   postedWisdoms.push(wisdom);
   fs.writeFileSync(LOG_FILE, JSON.stringify(postedWisdoms, null, 2));
+}
+
+function saveCurrentIndex(index) {
+  fs.writeFileSync(INDEX_FILE, JSON.stringify({ currentIndex: index }, null, 2));
 }
 
 function hasBeenPosted(wisdom) {
@@ -64,7 +82,7 @@ async function postToFacebook(message) {
   const url = `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/feed`;
   const payload = {
     message: `🧠 Caption: AI Nwanne - Daily Wisdom 📚\n\n${message}\n\n#AINwanne #AfricanAI #NaijaCulture`,
-    access_token: process.env.FACEBOOK_ACCESS_TOKEN
+    access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN // <-- page access token here
   };
 
   try {
@@ -82,7 +100,6 @@ async function runScheduler() {
   let wisdom = await generateWisdom(language);
   let attempts = 0;
 
-  // Retry up to 3 times if wisdom was already posted
   while (wisdom && hasBeenPosted(wisdom) && attempts < 3) {
     console.log("♻️ Duplicate detected, generating new wisdom...");
     wisdom = await generateWisdom(language);
@@ -96,7 +113,9 @@ async function runScheduler() {
     console.warn("⚠️ Couldn't generate unique wisdom after multiple attempts, skipping post.");
   }
 
+  // Increment currentIndex and save it persistently
   currentIndex = (currentIndex + 1) % LANGUAGES.length;
+  saveCurrentIndex(currentIndex);
 }
 
 // Log start
