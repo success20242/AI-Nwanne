@@ -82,7 +82,7 @@ async function postToFacebook(message) {
   const url = `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/feed`;
   const payload = {
     message: `🧠 Caption: AI Nwanne - Daily Wisdom 📚\n\n${message}\n\n#AINwanne #AfricanAI #NaijaCulture`,
-    access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN // <-- page access token here
+    access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN
   };
 
   try {
@@ -90,6 +90,27 @@ async function postToFacebook(message) {
     console.log('✅ Posted to Facebook:', res.data);
   } catch (err) {
     console.error('❌ Facebook Post Error:', err.response?.data || err.message);
+  }
+}
+
+async function postToTelegram(message) {
+  if (!message || !process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+    console.error("⚠️ Telegram config or message missing.");
+    return;
+  }
+
+  const telegramUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const payload = {
+    chat_id: process.env.TELEGRAM_CHAT_ID,
+    text: `🧠 *AI Nwanne - Daily Wisdom*\n\n${message}\n\n#AINwanne #AfricanAI #NaijaCulture`,
+    parse_mode: "Markdown"
+  };
+
+  try {
+    const res = await axios.post(telegramUrl, payload);
+    console.log("✅ Posted to Telegram:", res.data);
+  } catch (err) {
+    console.error("❌ Telegram Post Error:", err.response?.data || err.message);
   }
 }
 
@@ -108,12 +129,12 @@ async function runScheduler() {
 
   if (wisdom && !hasBeenPosted(wisdom)) {
     await postToFacebook(wisdom);
+    await postToTelegram(wisdom);
     saveWisdomLog(wisdom);
   } else {
     console.warn("⚠️ Couldn't generate unique wisdom after multiple attempts, skipping post.");
   }
 
-  // Increment currentIndex and save it persistently
   currentIndex = (currentIndex + 1) % LANGUAGES.length;
   saveCurrentIndex(currentIndex);
 }
