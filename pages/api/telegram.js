@@ -9,32 +9,38 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const COOLDOWN_MS = 3000; // per user cooldown in ms
 
 async function translateTo(text, targetLang) {
-  if (targetLang === "en") return text; // no translation needed
+  if (targetLang === "en") return text;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
-    messages: [
-      { role: "system", content: "You are a helpful translator." },
-      { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
-    ],
-    temperature: 0,
-    max_tokens: 500,
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "You are a helpful translator." },
+        { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
+      ],
+      temperature: 0,
+      max_tokens: 500,
+    });
 
-  return response.choices[0].message.content.trim();
+    return response.choices[0]?.message?.content?.trim() || text;
+  } catch (err) {
+    console.error("Translation failed:", err);
+    return text; // Fallback: return original text
+  }
 }
 
 export default async function handler(req, res) {
   try {
-    const msg = req.body.message?.text;
-    const chatId = req.body.message?.chat.id;
+    const message = req.body?.message;
+    const msg = message?.text?.trim();
+    const chatId = message?.chat?.id;
 
     if (!msg || !chatId) {
-      console.log("No message or chat ID found in request body.");
+      console.log("No message or chat ID found.");
       return res.end("No message");
     }
 
-    // Rate limit per user
+    // Cooldown control
     const lastRequestKey = `lastReq:${chatId}`;
     const lastRequest = await redis.get(lastRequestKey);
     const now = Date.now();
@@ -45,28 +51,28 @@ export default async function handler(req, res) {
     }
     await redis.set(lastRequestKey, now.toString(), "PX", COOLDOWN_MS);
 
-    // Detect language with cache
+    // Detect language (cached)
     const langCacheKey = `lang:${chatId}:${msg}`;
     let lang = await redis.get(langCacheKey);
     if (!lang) {
       lang = await detectLang(msg);
-      await redis.set(langCacheKey, lang, "EX", 3600); // cache 1 hour
+      await redis.set(langCacheKey, lang, "EX", 3600);
     }
 
-    // AI response cache
+    // AI response (cached)
     const aiCacheKey = `aiResp:${chatId}:${msg}`;
     let answer = await redis.get(aiCacheKey);
     if (!answer) {
       answer = await askAI(msg, lang);
-      await redis.set(aiCacheKey, answer, "EX", 3600); // cache 1 hour
+      await redis.set(aiCacheKey, answer, "EX", 3600);
     }
 
-    // Auto-translate if needed
+    // Auto-translate back to detected language
     if (lang !== "en") {
       answer = await translateTo(answer, lang);
     }
 
-    // Send reply to Telegram
+    // Send message to Telegram
     const sendResponse = await fetch(
       `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
       {
@@ -81,13 +87,13 @@ export default async function handler(req, res) {
 
     if (!sendResponse.ok) {
       const errorText = await sendResponse.text();
-      console.error(`Failed to send Telegram message: ${errorText}`);
+      console.error("Failed to send Telegram message:", errorText);
       return res.status(500).end("Failed to send message");
     }
 
     res.end("Message sent");
   } catch (error) {
     console.error("Error in Telegram webhook handler:", error);
-    res.status(500).end("Failed to send message");
+    res.status(500).end("Internal server error");
   }
 }
