@@ -20,6 +20,7 @@ async function translateTo(text, targetLang) {
     temperature: 0,
     max_tokens: 500,
   });
+
   return response.choices[0].message.content.trim();
 }
 
