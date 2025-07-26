@@ -10,19 +10,29 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const POST_COOLDOWN_MS = 3000; // 3 seconds per user cooldown
 
+// Helper: sanitize Redis keys (basic, to avoid special chars in text keys)
+function sanitizeKey(str) {
+  return encodeURIComponent(str).replace(/\./g, "%2E");
+}
+
 async function translateTo(text, targetLang) {
   if (targetLang === "en") return text; // no translation needed
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
-    messages: [
-      { role: "system", content: "You are a helpful translator." },
-      { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
-    ],
-    temperature: 0,
-    max_tokens: 500,
-  });
-  return response.choices[0].message.content.trim();
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "You are a helpful translator." },
+        { role: "user", content: `Translate this to English:\n\n${text}` },
+      ],
+      temperature: 0,
+      max_tokens: 500,
+    });
+    return response.choices[0].message.content.trim();
+  } catch (error) {
+    console.error("❌ Translation error:", error);
+    return text; // fallback: return original text
+  }
 }
 
 export default async function handler(req, res) {
@@ -67,25 +77,25 @@ export default async function handler(req, res) {
       }
       await redis.set(lastRequestKey, now.toString(), "PX", POST_COOLDOWN_MS);
 
-      // Detect language with cache
-      const langCacheKey = `lang:${senderId}:${text}`;
+      // Detect language with caching
+      const langCacheKey = `lang:${senderId}:${sanitizeKey(text)}`;
       let lang = await redis.get(langCacheKey);
       if (!lang) {
         lang = await detectLang(text);
-        await redis.set(langCacheKey, lang, "EX", 3600); // cache 1 hour
+        await redis.set(langCacheKey, lang, "EX", 3600); // cache for 1 hour
       }
 
       // AI response cache
-      const aiCacheKey = `aiResp:${senderId}:${text}`;
+      const aiCacheKey = `aiResp:${senderId}:${sanitizeKey(text)}`;
       let answer = await redis.get(aiCacheKey);
       if (!answer) {
         answer = await askAI(text, lang);
-        await redis.set(aiCacheKey, answer, "EX", 3600); // cache 1 hour
+        await redis.set(aiCacheKey, answer, "EX", 3600); // cache for 1 hour
       }
 
-      // Auto-translate if needed
+      // Translate answer to English if original language NOT English
       if (lang !== "en") {
-        answer = await translateTo(answer, lang);
+        answer = await translateTo(answer, "en");
       }
 
       // Send text reply to Facebook user
