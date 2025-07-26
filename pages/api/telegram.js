@@ -7,28 +7,28 @@ export default async function handler(req, res) {
   const msg = req.body.message?.text;
   const chatId = req.body.message?.chat.id;
 
-  if (!msg) return res.end("No message");
+  if (!msg || !chatId) {
+    return res.end("No message");
+  }
 
-  const lang = detectLang(msg);
-  const langCode = langToCode(lang);
-  const answer = await askAI(msg, lang);
-  // const file = `/tmp/voice.mp3`;
+  try {
+    const lang = detectLang(msg);
+    const langCode = langToCode(lang);
+    const answer = await askAI(msg, lang);
 
-  // await generateVoice(answer, langCode, file);
-  // await sendTelegramVoice(process.env.TELEGRAM_BOT_TOKEN, chatId, file, answer);
+    // Send AI-generated reply back to Telegram
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: answer,
+      }),
+    });
 
-  // Instead, send only the text message back
-  // You probably have a Telegram Bot client setup somewhere else to send messages
-  // If not, you can add a simple fetch or axios call here to send the text reply
-
-  // Example using axios to send text message:
-  /*
-  import axios from "axios";
-  await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    chat_id: chatId,
-    text: answer
-  });
-  */
-
-  res.end("OK");
+    res.end("Message sent");
+  } catch (error) {
+    console.error("Error replying to Telegram:", error);
+    res.status(500).end("Failed to send message");
+  }
 }
