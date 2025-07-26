@@ -7,74 +7,59 @@ import { detectLang, langToCode } from "../../lib/detectLang.js";
 export default async function handler(req, res) {
   // ===== Webhook verification (GET) =====
   if (req.method === "GET") {
-    const VERIFY_TOKEN = "success20242"; // Your chosen verify token
+    const VERIFY_TOKEN = "success20242";
 
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
 
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
-      console.log("WEBHOOK VERIFIED");
+      console.log("✅ FACEBOOK WEBHOOK VERIFIED");
       return res.status(200).send(challenge);
     } else {
+      console.warn("❌ Verification failed: invalid token");
       return res.status(403).send("Forbidden");
     }
   }
 
   // ===== Handle webhook events (POST) =====
   if (req.method === "POST") {
-    const { entry } = req.body;
-    const messaging = entry?.[0]?.messaging?.[0];
-    const text = messaging?.message?.text;
-    const senderId = messaging?.sender?.id;
+    try {
+      const { entry } = req.body;
+      const messaging = entry?.[0]?.messaging?.[0];
+      const text = messaging?.message?.text;
+      const senderId = messaging?.sender?.id;
 
-    if (!text) return res.end("OK");
-
-    const lang = detectLang(text);
-    const answer = await askAI(text, lang);
-    const langCode = langToCode(lang);
-    // const file = `/tmp/fbvoice.mp3`;
-    // await generateVoice(answer, langCode, file);
-
-    // Send text reply
-    await axios.post(
-      `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`,
-      {
-        messaging_type: "RESPONSE",
-        recipient: { id: senderId },
-        message: { text: answer },
+      if (!text || !senderId) {
+        console.warn("⚠️ No text or sender ID");
+        return res.end("No valid message");
       }
-    );
 
-    /*
-    // Upload voice note
-    const form = new FormData();
-    form.append("filedata", fs.createReadStream(file));
-    const { data } = await axios.post(
-      `https://graph.facebook.com/v19.0/me/message_attachments?access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`,
-      form,
-      { headers: form.getHeaders() }
-    );
+      const lang = detectLang(text);
+      const langCode = langToCode(lang);
+      const answer = await askAI(text, lang);
 
-    const attachment_id = data.attachment_id;
+      // Send text reply to Facebook user
+      const fbResponse = await axios.post(
+        `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`,
+        {
+          messaging_type: "RESPONSE",
+          recipient: { id: senderId },
+          message: { text: answer },
+        }
+      );
 
-    // Send audio reply
-    await axios.post(
-      `https://graph.facebook.com/v19.0/me/messages?access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`,
-      {
-        messaging_type: "RESPONSE",
-        recipient: { id: senderId },
-        message: {
-          attachment: {
-            type: "audio",
-            payload: { attachment_id },
-          },
-        },
+      if (fbResponse.status !== 200) {
+        console.error("❌ Failed to send message:", fbResponse.data);
+        return res.status(500).end("Failed to send");
       }
-    );
-    */
 
-    return res.end("OK");
+      console.log(`✅ Replied to Facebook user ${senderId}`);
+      return res.end("Message sent");
+    } catch (error) {
+      console.error("❌ Error handling Facebook message:", error.response?.data || error.message);
+      return res.status(500).end("Internal server error");
+    }
   }
 
   // ===== Unsupported HTTP methods =====
