@@ -1,12 +1,29 @@
+import Redis from "ioredis";
+import axios from "axios";
+import { OpenAI } from "openai";
 import { askAI } from "../../lib/ai.js";
 // import { generateVoice } from "../../lib/tts.js";
-import fs from "fs";
-import axios from "axios";
 import { detectLang, langToCode } from "../../lib/detectLang.js";
 
-// Simple in-memory rate limiter (adjust as needed)
-let lastPostTime = 0;
-const POST_COOLDOWN_MS = 3000; // 3 seconds cooldown between POST requests
+const redis = new Redis(process.env.REDIS_URL);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const POST_COOLDOWN_MS = 3000; // 3 seconds per user cooldown
+
+async function translateTo(text, targetLang) {
+  if (targetLang === "en") return text; // no translation needed
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-3.5-turbo",
+    messages: [
+      { role: "system", content: "You are a helpful translator." },
+      { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
+    ],
+    temperature: 0,
+    max_tokens: 500,
+  });
+  return response.choices[0].message.content.trim();
+}
 
 export default async function handler(req, res) {
   // ===== Webhook verification (GET) =====
@@ -28,13 +45,6 @@ export default async function handler(req, res) {
 
   // ===== Handle webhook events (POST) =====
   if (req.method === "POST") {
-    const now = Date.now();
-    if (now - lastPostTime < POST_COOLDOWN_MS) {
-      console.warn("⚠️ POST request rate-limited to avoid excessive calls");
-      return res.status(429).end("Too Many Requests");
-    }
-    lastPostTime = now;
-
     try {
       const { entry } = req.body;
       const messaging = entry?.[0]?.messaging?.[0];
@@ -46,10 +56,37 @@ export default async function handler(req, res) {
         return res.end("No valid message");
       }
 
-      // Await the async detectLang function
-      const lang = await detectLang(text);
-      const langCode = langToCode(lang);
-      const answer = await askAI(text, lang);
+      // Rate limit per senderId
+      const lastRequestKey = `lastReq:${senderId}`;
+      const lastRequest = await redis.get(lastRequestKey);
+      const now = Date.now();
+
+      if (lastRequest && now - parseInt(lastRequest, 10) < POST_COOLDOWN_MS) {
+        console.warn(`⚠️ User ${senderId} rate limited`);
+        return res.status(429).end("Too Many Requests");
+      }
+      await redis.set(lastRequestKey, now.toString(), "PX", POST_COOLDOWN_MS);
+
+      // Detect language with cache
+      const langCacheKey = `lang:${senderId}:${text}`;
+      let lang = await redis.get(langCacheKey);
+      if (!lang) {
+        lang = await detectLang(text);
+        await redis.set(langCacheKey, lang, "EX", 3600); // cache 1 hour
+      }
+
+      // AI response cache
+      const aiCacheKey = `aiResp:${senderId}:${text}`;
+      let answer = await redis.get(aiCacheKey);
+      if (!answer) {
+        answer = await askAI(text, lang);
+        await redis.set(aiCacheKey, answer, "EX", 3600); // cache 1 hour
+      }
+
+      // Auto-translate if needed
+      if (lang !== "en") {
+        answer = await translateTo(answer, lang);
+      }
 
       // Send text reply to Facebook user
       const fbResponse = await axios.post(
