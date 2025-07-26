@@ -25,14 +25,15 @@ async function translateTo(text, targetLang) {
 }
 
 export default async function handler(req, res) {
-  const msg = req.body.message?.text;
-  const chatId = req.body.message?.chat.id;
-
-  if (!msg || !chatId) {
-    return res.end("No message");
-  }
-
   try {
+    const msg = req.body.message?.text;
+    const chatId = req.body.message?.chat.id;
+
+    if (!msg || !chatId) {
+      console.log("No message or chat ID found in request body.");
+      return res.end("No message");
+    }
+
     // Rate limit per user
     const lastRequestKey = `lastReq:${chatId}`;
     const lastRequest = await redis.get(lastRequestKey);
@@ -66,18 +67,27 @@ export default async function handler(req, res) {
     }
 
     // Send reply to Telegram
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: answer,
-      }),
-    });
+    const sendResponse = await fetch(
+      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: answer,
+        }),
+      }
+    );
+
+    if (!sendResponse.ok) {
+      const errorText = await sendResponse.text();
+      console.error(`Failed to send Telegram message: ${errorText}`);
+      return res.status(500).end("Failed to send message");
+    }
 
     res.end("Message sent");
   } catch (error) {
-    console.error("Error replying to Telegram:", error);
+    console.error("Error in Telegram webhook handler:", error);
     res.status(500).end("Failed to send message");
   }
 }
