@@ -4,6 +4,10 @@ import fs from "fs";
 import axios from "axios";
 import { detectLang, langToCode } from "../../lib/detectLang.js";
 
+// Simple in-memory rate limiter (adjust as needed)
+let lastPostTime = 0;
+const POST_COOLDOWN_MS = 3000; // 3 seconds cooldown between POST requests
+
 export default async function handler(req, res) {
   // ===== Webhook verification (GET) =====
   if (req.method === "GET") {
@@ -24,6 +28,13 @@ export default async function handler(req, res) {
 
   // ===== Handle webhook events (POST) =====
   if (req.method === "POST") {
+    const now = Date.now();
+    if (now - lastPostTime < POST_COOLDOWN_MS) {
+      console.warn("⚠️ POST request rate-limited to avoid excessive calls");
+      return res.status(429).end("Too Many Requests");
+    }
+    lastPostTime = now;
+
     try {
       const { entry } = req.body;
       const messaging = entry?.[0]?.messaging?.[0];
@@ -35,7 +46,8 @@ export default async function handler(req, res) {
         return res.end("No valid message");
       }
 
-      const lang = detectLang(text);
+      // Await the async detectLang function
+      const lang = await detectLang(text);
       const langCode = langToCode(lang);
       const answer = await askAI(text, lang);
 
