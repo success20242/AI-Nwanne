@@ -25,7 +25,7 @@ async function translateTo(text, targetLang) {
     return response.choices[0]?.message?.content?.trim() || text;
   } catch (err) {
     console.error("Translation failed:", err);
-    return text; // Fallback: return original text
+    return text; // fallback
   }
 }
 
@@ -35,10 +35,7 @@ export default async function handler(req, res) {
     const msg = message?.text?.trim();
     const chatId = message?.chat?.id;
 
-    if (!msg || !chatId) {
-      console.log("No message or chat ID found.");
-      return res.end("No message");
-    }
+    if (!msg || !chatId) return res.end("No message");
 
     // Cooldown control
     const lastRequestKey = `lastReq:${chatId}`;
@@ -46,7 +43,6 @@ export default async function handler(req, res) {
     const now = Date.now();
 
     if (lastRequest && now - parseInt(lastRequest, 10) < COOLDOWN_MS) {
-      console.warn(`⚠️ User ${chatId} rate limited`);
       return res.status(429).end("Too Many Requests");
     }
     await redis.set(lastRequestKey, now.toString(), "PX", COOLDOWN_MS);
@@ -67,12 +63,12 @@ export default async function handler(req, res) {
       await redis.set(aiCacheKey, answer, "EX", 3600);
     }
 
-    // Auto-translate back to detected language
+    // Translate if needed
     if (lang !== "en") {
       answer = await translateTo(answer, lang);
     }
 
-    // Send message to Telegram
+    // Send reply to Telegram
     const sendResponse = await fetch(
       `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
       {
