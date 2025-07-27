@@ -2,6 +2,7 @@ import axios from 'axios';
 import cron from 'node-cron';
 import fs from 'fs';
 import 'dotenv/config';
+import { translate } from './lib/translate.js'; // <-- Use your translation module
 
 const LANGUAGES = ["english", "igbo", "hausa", "yoruba"];
 const INTERVAL_HOURS = 6;
@@ -54,15 +55,22 @@ function hasBeenPosted(wisdom) {
   return postedWisdoms.some(w => w.trim() === wisdom.trim());
 }
 
-async function generateWisdom(language) {
-  const systemPrompt = `You are AI Nwanne, an intelligent African cultural assistant.
-You must craft a SHORT, stylish, and culturally rich message exploring traditional wisdom or values.
-First, write in native ${language}, then provide a short English translation below.
-The output must be concise, clear, and formatted with a bold header. Use authentic phrasing.`;
+// Helper to get ISO code for translation API
+function getLangCode(language) {
+  const lang = language.toLowerCase();
+  if (lang === "yoruba") return "yo";
+  if (lang === "hausa") return "ha";
+  if (lang === "igbo") return "ig";
+  if (lang === "english") return "en";
+  return lang.slice(0, 2);
+}
 
-  const userPrompt = `Give a culturally rich, SHORT *question and answer* in ${language} about traditional beliefs or values.
-First write only in ${language}, then provide a brief English translation.
-Include a bold title or header and use authentic, natural expression.`;
+async function generateWisdom(language) {
+  // Always generate in English
+  const systemPrompt = `You are AI Nwanne, an intelligent African cultural assistant.
+Write a SHORT, stylish, and culturally rich message exploring traditional wisdom or values in ENGLISH only. The output must be concise, clear, and formatted with a bold header. Use authentic phrasing.`;
+
+  const userPrompt = `Give a culturally rich, SHORT *question and answer* in ENGLISH about traditional beliefs or values. Only reply in ENGLISH. Include a bold title or header and use authentic, natural expression.`;
 
   try {
     const response = await axios.post(
@@ -83,7 +91,23 @@ Include a bold title or header and use authentic, natural expression.`;
         }
       }
     );
-    return response.data.choices[0]?.message?.content?.trim() ?? null;
+    const englishWisdom = response.data.choices[0]?.message?.content?.trim() ?? null;
+    if (!englishWisdom) return null;
+
+    // Now use your translation module to get native version
+    let nativeTranslation = englishWisdom;
+    if (language.toLowerCase() !== "english") {
+      try {
+        const langCode = getLangCode(language);
+        nativeTranslation = await translate(englishWisdom, langCode, "en");
+      } catch (err) {
+        console.error("❌ Wisdom translation failed:", err);
+        nativeTranslation = "[Translation unavailable]";
+      }
+    }
+
+    // Format the result: English first, then native
+    return `*ENGLISH*: ${englishWisdom}\n\n*${language.toUpperCase()}*: ${nativeTranslation}`;
   } catch (error) {
     console.error("❌ OpenAI Error:", error.response?.data || error.message);
     return null;
