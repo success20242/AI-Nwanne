@@ -2,9 +2,6 @@ import axios from 'axios';
 import cron from 'node-cron';
 import fs from 'fs';
 import 'dotenv/config';
-// import Redis from 'ioredis'; // Uncomment if Redis is configured
-
-// const redis = new Redis(); // Optional Redis connection
 
 const LANGUAGES = ["english", "igbo", "hausa", "yoruba"];
 const INTERVAL_HOURS = 6;
@@ -13,7 +10,7 @@ const INDEX_FILE = './current_index.json';
 
 let currentIndex = 0;
 
-// Load index
+// Load current index
 if (fs.existsSync(INDEX_FILE)) {
   try {
     const obj = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf-8'));
@@ -23,7 +20,7 @@ if (fs.existsSync(INDEX_FILE)) {
   }
 }
 
-// Load log
+// Load wisdom log
 let postedWisdoms = [];
 if (fs.existsSync(LOG_FILE)) {
   try {
@@ -43,24 +40,31 @@ function saveCurrentIndex(index) {
 }
 
 function hasBeenPosted(wisdom) {
-  return postedWisdoms.includes(wisdom);
+  // Compare trimmed wisdoms for safety
+  return postedWisdoms.some(w => w.trim() === wisdom.trim());
 }
 
 async function generateWisdom(language) {
-  const systemPrompt = `You are AI Nwanne — an intelligent African cultural assistant.\nYou will craft deep, stylish, and well-formatted messages exploring traditional wisdom and values.\nUse native ${language} language *first*, and then provide an English translation below it.\nOutput must be cleanly styled, attractive, and shareable (bold headers, spacing, emojis if fitting).`;
+  const systemPrompt = `You are AI Nwanne, an intelligent African cultural assistant.
+You must craft a SHORT, stylish, and culturally rich message exploring traditional wisdom or values.
+First, write in native ${language}, then provide a short English translation below.
+The output must be concise, clear, and formatted with a bold header. Use authentic phrasing.`;
 
-  const userPrompt = `Create a culturally rich *question and answer* in ${language} related to traditional beliefs or values.\nFirst, write it fully in ${language}, then provide an English translation right after it.\nInclude a bold title or header.\nAdd spacing and emojis (if fitting).\nUse native words and authentic phrasing.`;
+  const userPrompt = `Give a culturally rich, SHORT *question and answer* in ${language} about traditional beliefs or values.
+First write only in ${language}, then provide a brief English translation.
+Include a bold title or header and use authentic, natural expression.`;
 
   try {
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        temperature: 0.85
+        temperature: 0.7,
+        max_tokens: 350
       },
       {
         headers: {
@@ -69,12 +73,7 @@ async function generateWisdom(language) {
         }
       }
     );
-    const wisdom = response.data.choices[0].message.content.trim();
-
-    // Optional: Cache it
-    // await redis.setex(`wisdom:${language}`, 3600, wisdom);
-
-    return wisdom;
+    return response.data.choices[0].message.content.trim();
   } catch (error) {
     console.error("❌ OpenAI Error:", error.response?.data || error.message);
     return null;
@@ -83,6 +82,10 @@ async function generateWisdom(language) {
 
 async function postToFacebook(message) {
   if (!message) return;
+  if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) {
+    console.error("❌ Facebook env vars not set.");
+    return;
+  }
   const payload = {
     message: `🧠 *AI Nwanne - Daily Wisdom* 📚\n\n${message}\n\n#AINwanne #AfricanAI #NaijaCulture`,
     access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN
@@ -100,7 +103,11 @@ async function postToFacebook(message) {
 }
 
 async function postToTelegram(message) {
-  if (!message || !process.env.TELEGRAM_BOT_TOKEN) return;
+  if (!message) return;
+  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+    console.error("❌ Telegram env vars not set.");
+    return;
+  }
 
   const payload = {
     chat_id: process.env.TELEGRAM_CHAT_ID,
@@ -126,6 +133,7 @@ async function runScheduler() {
   let wisdom = await generateWisdom(lang);
   let attempts = 0;
 
+  // Avoid duplicate posts, try up to 3 times
   while (wisdom && hasBeenPosted(wisdom) && attempts < 3) {
     console.warn("♻️ Duplicate detected. Trying again...");
     wisdom = await generateWisdom(lang);
