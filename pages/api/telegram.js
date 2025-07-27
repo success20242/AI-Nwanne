@@ -1,7 +1,7 @@
 import Redis from "ioredis";
-import { OpenAI } from "openai";
 import { askAI } from "../../lib/ai.js";
-import { detectLang, langToCode } from "../../lib/detectLang.js";
+import { detectLang } from "../../lib/detectLang.js";
+import { OpenAI } from "openai";
 
 const redis = new Redis(process.env.REDIS_URL);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -10,7 +10,6 @@ const COOLDOWN_MS = 3000; // per user cooldown in ms
 
 async function translateTo(text, targetLang) {
   if (targetLang === "en") return text;
-
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
@@ -21,7 +20,6 @@ async function translateTo(text, targetLang) {
       temperature: 0,
       max_tokens: 500,
     });
-
     return response.choices[0]?.message?.content?.trim() || text;
   } catch (err) {
     console.error("Translation failed:", err);
@@ -34,14 +32,12 @@ export default async function handler(req, res) {
     const message = req.body?.message;
     const msg = message?.text?.trim();
     const chatId = message?.chat?.id;
-
     if (!msg || !chatId) return res.end("No message");
 
     // Cooldown control
     const lastRequestKey = `lastReq:${chatId}`;
     const lastRequest = await redis.get(lastRequestKey);
     const now = Date.now();
-
     if (lastRequest && now - parseInt(lastRequest, 10) < COOLDOWN_MS) {
       return res.status(429).end("Too Many Requests");
     }
@@ -55,7 +51,7 @@ export default async function handler(req, res) {
       await redis.set(langCacheKey, lang, "EX", 3600);
     }
 
-    // AI response (cached)
+    // AI response (cached, with Wikipedia fact-checking)
     const aiCacheKey = `aiResp:${chatId}:${msg}`;
     let answer = await redis.get(aiCacheKey);
     if (!answer) {
