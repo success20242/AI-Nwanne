@@ -2,8 +2,7 @@ import Redis from "ioredis";
 import axios from "axios";
 import { OpenAI } from "openai";
 import { askAI } from "../../lib/ai.js";
-// import { generateVoice } from "../../lib/tts.js";
-import { detectLang, langToCode } from "../../lib/detectLang.js";
+import { detectLang } from "../../lib/detectLang.js";
 
 const redis = new Redis(process.env.REDIS_URL);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -23,12 +22,12 @@ async function translateTo(text, targetLang) {
       model: "gpt-3.5-turbo",
       messages: [
         { role: "system", content: "You are a helpful translator." },
-        { role: "user", content: `Translate this to English:\n\n${text}` },
+        { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
       ],
       temperature: 0,
       max_tokens: 500,
     });
-    return response.choices[0].message.content.trim();
+    return response.choices[0]?.message?.content?.trim() || text;
   } catch (error) {
     console.error("❌ Translation error:", error);
     return text; // fallback: return original text
@@ -85,7 +84,7 @@ export default async function handler(req, res) {
         await redis.set(langCacheKey, lang, "EX", 3600); // cache for 1 hour
       }
 
-      // AI response cache
+      // AI response cache (uses Wikipedia fact-checking via askAI)
       const aiCacheKey = `aiResp:${senderId}:${sanitizeKey(text)}`;
       let answer = await redis.get(aiCacheKey);
       if (!answer) {
@@ -93,9 +92,9 @@ export default async function handler(req, res) {
         await redis.set(aiCacheKey, answer, "EX", 3600); // cache for 1 hour
       }
 
-      // Translate answer to English if original language NOT English
+      // Translate answer to original language if needed
       if (lang !== "en") {
-        answer = await translateTo(answer, "en");
+        answer = await translateTo(answer, lang);
       }
 
       // Send text reply to Facebook user
