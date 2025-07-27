@@ -20,3 +20,5 @@ out/
 .vercel
 .env
 .env.local
+current_index.json
+posted_wisdom.json
