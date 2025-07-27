@@ -2,7 +2,7 @@ import axios from 'axios';
 import cron from 'node-cron';
 import fs from 'fs';
 import 'dotenv/config';
-import { translate } from './lib/translate.js'; // <-- Use your translation module
+import { translate } from '../lib/translate.js'; // <-- Corrected relative path
 
 const LANGUAGES = ["english", "igbo", "hausa", "yoruba"];
 const INTERVAL_HOURS = 6;
