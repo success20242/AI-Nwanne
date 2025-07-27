@@ -1,37 +1,16 @@
 import Redis from "ioredis";
 import axios from "axios";
-import { OpenAI } from "openai";
 import { askAI } from "../../lib/ai.js";
 import { detectLang } from "../../lib/detectLang.js";
+import { translate } from "../../lib/translate.js"; // Use the new provider-based module
 
 const redis = new Redis(process.env.REDIS_URL);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const POST_COOLDOWN_MS = 3000; // 3 seconds per user cooldown
 
 // Helper: sanitize Redis keys (basic, to avoid special chars in text keys)
 function sanitizeKey(str) {
   return encodeURIComponent(str).replace(/\./g, "%2E");
-}
-
-async function translateTo(text, targetLang) {
-  if (targetLang === "en") return text; // no translation needed
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "You are a helpful translator." },
-        { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
-      ],
-      temperature: 0,
-      max_tokens: 500,
-    });
-    return response.choices[0]?.message?.content?.trim() || text;
-  } catch (error) {
-    console.error("❌ Translation error:", error);
-    return text; // fallback: return original text
-  }
 }
 
 export default async function handler(req, res) {
@@ -94,7 +73,12 @@ export default async function handler(req, res) {
 
       // Translate answer to original language if needed
       if (lang !== "en") {
-        answer = await translateTo(answer, lang);
+        try {
+          answer = await translate(answer, lang, "en");
+        } catch (error) {
+          console.error("❌ Translation error:", error);
+          // fallback: send English answer if translation fails
+        }
       }
 
       // Send text reply to Facebook user
