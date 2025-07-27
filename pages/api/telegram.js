@@ -1,30 +1,15 @@
 import Redis from "ioredis";
 import { askAI } from "../../lib/ai.js";
 import { detectLang } from "../../lib/detectLang.js";
-import { OpenAI } from "openai";
+import { translate } from "../../lib/translate.js"; // Use the provider-based translation module
 
 const redis = new Redis(process.env.REDIS_URL);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const COOLDOWN_MS = 3000; // per user cooldown in ms
 
-async function translateTo(text, targetLang) {
-  if (targetLang === "en") return text;
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "You are a helpful translator." },
-        { role: "user", content: `Translate this to ${targetLang}:\n\n${text}` },
-      ],
-      temperature: 0,
-      max_tokens: 500,
-    });
-    return response.choices[0]?.message?.content?.trim() || text;
-  } catch (err) {
-    console.error("Translation failed:", err);
-    return text; // fallback
-  }
+// Helper: sanitize Redis keys (basic, to avoid special chars in text keys)
+function sanitizeKey(str) {
+  return encodeURIComponent(str).replace(/\./g, "%2E");
 }
 
 export default async function handler(req, res) {
@@ -44,7 +29,7 @@ export default async function handler(req, res) {
     await redis.set(lastRequestKey, now.toString(), "PX", COOLDOWN_MS);
 
     // Detect language (cached)
-    const langCacheKey = `lang:${chatId}:${msg}`;
+    const langCacheKey = `lang:${chatId}:${sanitizeKey(msg)}`;
     let lang = await redis.get(langCacheKey);
     if (!lang) {
       lang = await detectLang(msg);
@@ -52,7 +37,7 @@ export default async function handler(req, res) {
     }
 
     // AI response (cached, with Wikipedia fact-checking)
-    const aiCacheKey = `aiResp:${chatId}:${msg}`;
+    const aiCacheKey = `aiResp:${chatId}:${sanitizeKey(msg)}`;
     let answer = await redis.get(aiCacheKey);
     if (!answer) {
       answer = await askAI(msg, lang);
@@ -61,7 +46,12 @@ export default async function handler(req, res) {
 
     // Translate if needed
     if (lang !== "en") {
-      answer = await translateTo(answer, lang);
+      try {
+        answer = await translate(answer, lang, "en");
+      } catch (err) {
+        console.error("Translation failed:", err);
+        // fallback: English answer if translation fails
+      }
     }
 
     // Send reply to Telegram
