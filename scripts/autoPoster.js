@@ -15,8 +15,8 @@ if (fs.existsSync(INDEX_FILE)) {
   try {
     const obj = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf-8'));
     if (typeof obj.currentIndex === 'number') currentIndex = obj.currentIndex;
-  } catch {
-    console.error("⚠️ Failed to parse index file.");
+  } catch (e) {
+    console.error("⚠️ Failed to parse index file.", e);
   }
 }
 
@@ -25,22 +25,32 @@ let postedWisdoms = [];
 if (fs.existsSync(LOG_FILE)) {
   try {
     postedWisdoms = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
-  } catch {
-    console.error("⚠️ Failed to load wisdom log.");
+    if (!Array.isArray(postedWisdoms)) postedWisdoms = [];
+  } catch (e) {
+    console.error("⚠️ Failed to load wisdom log.", e);
+    postedWisdoms = [];
   }
 }
 
 function saveWisdomLog(wisdom) {
   postedWisdoms.push(wisdom);
-  fs.writeFileSync(LOG_FILE, JSON.stringify(postedWisdoms, null, 2));
+  try {
+    fs.writeFileSync(LOG_FILE, JSON.stringify(postedWisdoms, null, 2));
+  } catch (e) {
+    console.error("❌ Failed to save wisdom log:", e);
+  }
 }
 
 function saveCurrentIndex(index) {
-  fs.writeFileSync(INDEX_FILE, JSON.stringify({ currentIndex: index }, null, 2));
+  try {
+    fs.writeFileSync(INDEX_FILE, JSON.stringify({ currentIndex: index }, null, 2));
+  } catch (e) {
+    console.error("❌ Failed to save index file:", e);
+  }
 }
 
 function hasBeenPosted(wisdom) {
-  // Compare trimmed wisdoms for safety
+  if (!wisdom || !wisdom.trim) return false;
   return postedWisdoms.some(w => w.trim() === wisdom.trim());
 }
 
@@ -73,7 +83,7 @@ Include a bold title or header and use authentic, natural expression.`;
         }
       }
     );
-    return response.data.choices[0].message.content.trim();
+    return response.data.choices[0]?.message?.content?.trim() ?? null;
   } catch (error) {
     console.error("❌ OpenAI Error:", error.response?.data || error.message);
     return null;
@@ -96,7 +106,11 @@ async function postToFacebook(message) {
       `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/feed`,
       payload
     );
-    console.log("✅ Facebook post successful:", res.data.id);
+    if (res.data && res.data.id) {
+      console.log("✅ Facebook post successful:", res.data.id);
+    } else {
+      throw new Error("No post ID returned");
+    }
   } catch (err) {
     console.error("❌ Facebook Error:", err.response?.data || err.message);
   }
@@ -120,7 +134,11 @@ async function postToTelegram(message) {
       `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
       payload
     );
-    console.log("✅ Telegram post successful:", res.data.ok);
+    if (res.data && res.data.ok) {
+      console.log("✅ Telegram post successful:", res.data.result?.message_id ?? true);
+    } else {
+      throw new Error("Telegram API did not return ok");
+    }
   } catch (err) {
     console.error("❌ Telegram Error:", err.response?.data || err.message);
   }
