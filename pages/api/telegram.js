@@ -1,15 +1,35 @@
 import Redis from "ioredis";
-import { askAI } from "../../lib/ai.js";
-import { detectLang } from "../../lib/detectLang.js";
-import { translate } from "../../lib/translate.js"; // Use the provider-based translation module
+import { Configuration, OpenAIApi } from "openai";
 
 const redis = new Redis(process.env.REDIS_URL);
 
-const COOLDOWN_MS = 3000; // per user cooldown in ms
+const COOLDOWN_MS = 3000;
 
-// Helper: sanitize Redis keys (basic, to avoid special chars in text keys)
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(configuration);
+
+const USED_TOPICS_FILE = './used_topics.json';
+const memoryStore = './telegram_memory.json';
+
 function sanitizeKey(str) {
   return encodeURIComponent(str).replace(/\./g, "%2E");
+}
+
+async function loadMemory() {
+  try {
+    const fs = await import("fs/promises");
+    const data = await fs.readFile(memoryStore, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function saveMemory(memory) {
+  const fs = await import("fs/promises");
+  await fs.writeFile(memoryStore, JSON.stringify(memory, null, 2));
 }
 
 export default async function handler(req, res) {
@@ -17,9 +37,9 @@ export default async function handler(req, res) {
     const message = req.body?.message;
     const msg = message?.text?.trim();
     const chatId = message?.chat?.id;
+    const userFirstName = message?.from?.first_name || "there";
     if (!msg || !chatId) return res.end("No message");
 
-    // Cooldown control
     const lastRequestKey = `lastReq:${chatId}`;
     const lastRequest = await redis.get(lastRequestKey);
     const now = Date.now();
@@ -28,33 +48,29 @@ export default async function handler(req, res) {
     }
     await redis.set(lastRequestKey, now.toString(), "PX", COOLDOWN_MS);
 
-    // Detect language (cached)
-    const langCacheKey = `lang:${chatId}:${sanitizeKey(msg)}`;
-    let lang = await redis.get(langCacheKey);
-    if (!lang) {
-      lang = await detectLang(msg);
-      await redis.set(langCacheKey, lang, "EX", 3600);
+    const memory = await loadMemory();
+    const userKey = String(chatId);
+    let isFirstTime = !memory[userKey];
+
+    // Store user in memory
+    memory[userKey] = { firstSeen: new Date().toISOString(), name: userFirstName };
+    await saveMemory(memory);
+
+    let answer = "";
+    if (isFirstTime) {
+      answer = `👋 Welcome ${userFirstName}! I am *AI Nwanne*, your smart assistant. Ask me anything.`;
+    } else {
+      const prompt = `Reply conversationally and helpfully to this message: ${msg}`;
+      const completion = await openai.createChatCompletion({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a friendly assistant named AI Nwanne who helps with smart, accurate, and culturally aware responses." },
+          { role: "user", content: prompt },
+        ],
+      });
+      answer = completion.data.choices[0].message.content.trim();
     }
 
-    // AI response (cached, with Wikipedia fact-checking)
-    const aiCacheKey = `aiResp:${chatId}:${sanitizeKey(msg)}`;
-    let answer = await redis.get(aiCacheKey);
-    if (!answer) {
-      answer = await askAI(msg, lang);
-      await redis.set(aiCacheKey, answer, "EX", 3600);
-    }
-
-    // Translate if needed
-    if (lang !== "en") {
-      try {
-        answer = await translate(answer, lang, "en");
-      } catch (err) {
-        console.error("Translation failed:", err);
-        // fallback: English answer if translation fails
-      }
-    }
-
-    // Send reply to Telegram
     const sendResponse = await fetch(
       `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
       {
@@ -63,6 +79,12 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           chat_id: chatId,
           text: answer,
+          parse_mode: "Markdown",
+          reply_markup: {
+            keyboard: [["What can you do?", "Tell me a fun fact"]],
+            resize_keyboard: true,
+            one_time_keyboard: true,
+          },
         }),
       }
     );
