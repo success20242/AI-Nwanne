@@ -1,12 +1,14 @@
 import Redis from "ioredis";
 import { Configuration, OpenAIApi } from "openai";
+import fetch from "node-fetch"; // Ensure compatibility with Node <18
 
+// Initialize Redis and OpenAI
 const redis = new Redis(process.env.REDIS_URL);
 
 const config = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
 const openai = new OpenAIApi(config);
 
-const VERIFY_TOKEN ="success20242";
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "success20242";
 const FACEBOOK_ACCESS_TOKEN = process.env.FACEBOOK_ACCESS_TOKEN;
 
 const COOLDOWN_MS = 60000; // 1 minute cooldown window
@@ -108,6 +110,7 @@ async function sendMessage(senderId, message) {
   }
 }
 
+// Main webhook handler
 export default async function handler(req, res) {
   if (req.method === "GET") {
     const mode = req.query["hub.mode"];
@@ -121,13 +124,19 @@ export default async function handler(req, res) {
     const body = req.body;
     if (body.object === "page") {
       for (const entry of body.entry) {
+        if (!entry.messaging || !entry.messaging.length) continue;
         const webhookEvent = entry.messaging[0];
-        const senderId = webhookEvent.sender.id;
-        if (webhookEvent.message && webhookEvent.message.text) {
-          const text = webhookEvent.message.text;
-          await handleMessage(senderId, text);
-        } else if (webhookEvent.message && webhookEvent.message.quick_reply) {
-          await handleMessage(senderId, webhookEvent.message.quick_reply.payload);
+        const senderId = webhookEvent.sender && webhookEvent.sender.id;
+        if (!senderId) continue;
+        try {
+          if (webhookEvent.message && webhookEvent.message.text) {
+            const text = webhookEvent.message.text;
+            await handleMessage(senderId, text);
+          } else if (webhookEvent.message && webhookEvent.message.quick_reply) {
+            await handleMessage(senderId, webhookEvent.message.quick_reply.payload);
+          }
+        } catch (err) {
+          console.error("handleMessage failed:", err);
         }
       }
       return res.status(200).send("EVENT_RECEIVED");
