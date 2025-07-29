@@ -68,7 +68,7 @@ async function handleMessage(senderId, text) {
     const response = await openai.createChatCompletion({
       model: "gpt-3.5-turbo",
       messages: [
-        { role: "system", content: "You are AI Nwanne, a smart assistant for Facebook Messenger users." },
+        { role: "system", content: "You are AI-Nwanne, a smart assistant for Facebook Messenger users." },
         ...history,
       ],
     });
