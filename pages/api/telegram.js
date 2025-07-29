@@ -1,6 +1,6 @@
 import Redis from "ioredis";
 import { Configuration, OpenAIApi } from "openai";
-import fetch from "node-fetch"; // Add this for Node.js < 18 compatibility
+import fetch from "node-fetch";
 
 const redis = new Redis(process.env.REDIS_URL);
 const COOLDOWN_MS = 3000;
@@ -11,6 +11,8 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
+
   try {
     const message = req.body?.message;
     const msg = message?.text?.trim();
@@ -28,7 +30,6 @@ export default async function handler(req, res) {
     }
     await redis.set(lastRequestKey, now.toString(), "PX", COOLDOWN_MS);
 
-    // Store and check user info in Redis
     const userKey = `user:${chatId}`;
     const userExists = await redis.exists(userKey);
 
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
       await redis.hset(userKey, {
         firstSeen: new Date().toISOString(),
         name: userFirstName,
-        lang: "en", // Optional: default language
+        lang: "en",
       });
     }
 
@@ -75,13 +76,13 @@ export default async function handler(req, res) {
 
     if (!sendResponse.ok) {
       const errorText = await sendResponse.text();
-      console.error("Failed to send Telegram message:", errorText);
-      return res.status(500).end("Failed to send message");
+      console.error("Telegram Error:", errorText);
+      return res.status(500).end("Failed to send Telegram message");
     }
 
-    res.end("Message sent");
+    res.status(200).end("Message sent");
   } catch (error) {
-    console.error("Error in Telegram webhook handler:", error);
+    console.error("Telegram webhook error:", error);
     res.status(500).end("Internal server error");
   }
 }
