@@ -1,89 +1,42 @@
 import Redis from "ioredis";
 import { Configuration, OpenAIApi } from "openai";
-import fetch from "node-fetch"; // Ensure compatibility with Node <18
+import fetch from "node-fetch";
 
-// Initialize Redis and OpenAI
 const redis = new Redis(process.env.REDIS_URL);
 
-const config = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
-const openai = new OpenAIApi(config);
+const openai = new OpenAIApi(new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+}));
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "success20242";
 const FACEBOOK_ACCESS_TOKEN = process.env.FACEBOOK_ACCESS_TOKEN;
 
-const COOLDOWN_MS = 60000; // 1 minute cooldown window
+const COOLDOWN_MS = 60000;
 const MAX_REQUESTS_PER_WINDOW = 5;
 const MAX_HISTORY_LENGTH = 6;
-
-function sanitizeKey(str) {
-  return encodeURIComponent(str).replace(/\./g, "%2E");
-}
 
 async function isRateLimited(senderId) {
   const key = `rateLimit:${senderId}`;
   const now = Date.now();
+  let timestamps = (await redis.lrange(key, 0, -1)).map(Number);
+  timestamps = timestamps.filter(ts => now - ts < COOLDOWN_MS);
 
-  // get timestamps array from Redis
-  let timestamps = await redis.lrange(key, 0, -1);
-  timestamps = timestamps.map(Number).filter(ts => now - ts < COOLDOWN_MS);
+  if (timestamps.length >= MAX_REQUESTS_PER_WINDOW) return true;
 
-  if (timestamps.length >= MAX_REQUESTS_PER_WINDOW) {
-    return true;
-  }
-
-  // Add current timestamp and trim list
   await redis.lpush(key, now.toString());
   await redis.ltrim(key, 0, MAX_REQUESTS_PER_WINDOW - 1);
-  // Set expiry so Redis cleans it eventually
   await redis.expire(key, Math.ceil(COOLDOWN_MS / 1000));
 
   return false;
 }
 
 async function getMemory(senderId) {
-  const key = `memory:${senderId}`;
-  const json = await redis.get(key);
-  return json ? JSON.parse(json) : [];
+  const data = await redis.get(`memory:${senderId}`);
+  return data ? JSON.parse(data) : [];
 }
 
 async function saveMemory(senderId, history) {
-  const key = `memory:${senderId}`;
-  await redis.set(key, JSON.stringify(history), "EX", 3600); // 1 hour expiry
-}
-
-async function handleMessage(senderId, text) {
-  if (await isRateLimited(senderId)) {
-    return sendMessage(senderId, "⏱️ You've reached the limit. Please wait a moment before sending more messages.");
-  }
-
-  let history = await getMemory(senderId);
-  if (history.length === 0) {
-    await sendMessage(senderId, `👋 Hi, I'm AI-Nwanne! Ask me anything. You can also tap a quick option below.`);
-  }
-
-  history.push({ role: "user", content: text });
-  if (history.length > MAX_HISTORY_LENGTH) {
-    history.shift();
-  }
-
-  try {
-    const response = await openai.createChatCompletion({
-      model: "gpt-3.5-turbo",
-      messages: [
-        { role: "system", content: "You are AI-Nwanne, a smart assistant for Facebook Messenger users." },
-        ...history,
-      ],
-    });
-
-    const reply = response.data.choices[0].message.content;
-    history.push({ role: "assistant", content: reply });
-
-    await saveMemory(senderId, history);
-    await sendMessage(senderId, reply);
-  } catch (err) {
-    console.error("OpenAI error:", err.message);
-    await sendMessage(senderId, "⚠️ Sorry, I'm having trouble thinking right now.");
-  }
+  await redis.set(`memory:${senderId}`, JSON.stringify(history), "EX", 3600);
 }
 
 async function sendMessage(senderId, message) {
@@ -100,48 +53,83 @@ async function sendMessage(senderId, message) {
   };
 
   try {
-    await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${FACEBOOK_ACCESS_TOKEN}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/me/messages?access_token=${FACEBOOK_ACCESS_TOKEN}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!response.ok) {
+      console.error("Facebook API error:", await response.text());
+    }
   } catch (e) {
-    console.error("sendMessage error:", e);
+    console.error("sendMessage exception:", e);
   }
 }
 
-// Main webhook handler
+async function handleMessage(senderId, text) {
+  if (await isRateLimited(senderId)) {
+    return sendMessage(senderId, "⏱️ You've reached the limit. Please wait before sending more messages.");
+  }
+
+  let history = await getMemory(senderId);
+  const isFirstInteraction = history.length === 0;
+
+  if (isFirstInteraction) {
+    await sendMessage(senderId, `👋 Hi, I'm *AI-Nwanne*! Ask me anything. You can also tap a quick option below.`);
+  }
+
+  history.push({ role: "user", content: text });
+  if (history.length > MAX_HISTORY_LENGTH) history.shift();
+
+  try {
+    const chat = await openai.createChatCompletion({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "You are AI-Nwanne, a smart assistant for Facebook Messenger users." },
+        ...history,
+      ],
+    });
+
+    const reply = chat.data.choices[0]?.message?.content || "🤖 Sorry, I couldn't generate a response.";
+    history.push({ role: "assistant", content: reply });
+    await saveMemory(senderId, history);
+    await sendMessage(senderId, reply);
+  } catch (err) {
+    console.error("OpenAI error:", err);
+    await sendMessage(senderId, "⚠️ Sorry, something went wrong on my side.");
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
+    const { "hub.mode": mode, "hub.verify_token": token, "hub.challenge": challenge } = req.query;
     if (mode === "subscribe" && token === VERIFY_TOKEN) {
       return res.status(200).send(challenge);
     }
     return res.sendStatus(403);
-  } else if (req.method === "POST") {
-    const body = req.body;
-    if (body.object === "page") {
-      for (const entry of body.entry) {
-        if (!entry.messaging || !entry.messaging.length) continue;
-        const webhookEvent = entry.messaging[0];
-        const senderId = webhookEvent.sender && webhookEvent.sender.id;
-        if (!senderId) continue;
-        try {
-          if (webhookEvent.message && webhookEvent.message.text) {
-            const text = webhookEvent.message.text;
+  }
+
+  if (req.method === "POST") {
+    const { object, entry } = req.body;
+
+    if (object === "page" && Array.isArray(entry)) {
+      for (const ent of entry) {
+        for (const event of ent.messaging || []) {
+          const senderId = event.sender?.id;
+          const text = event.message?.text || event.message?.quick_reply?.payload;
+          if (senderId && text) {
             await handleMessage(senderId, text);
-          } else if (webhookEvent.message && webhookEvent.message.quick_reply) {
-            await handleMessage(senderId, webhookEvent.message.quick_reply.payload);
           }
-        } catch (err) {
-          console.error("handleMessage failed:", err);
         }
       }
       return res.status(200).send("EVENT_RECEIVED");
     }
+
     return res.sendStatus(404);
   }
+
   return res.sendStatus(405);
 }
