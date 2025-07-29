@@ -1,7 +1,6 @@
-// === IMPORTS (from your original script) ===
 import axios from 'axios';
 import cron from 'node-cron';
-import fs from 'fs';
+import fs from 'fs/promises';       // <-- use fs/promises here
 import 'dotenv/config';
 import { Configuration, OpenAIApi } from 'openai';
 
@@ -31,7 +30,7 @@ function getHashtags() {
 
 async function getUsedTopics() {
   try {
-    const data = await fs.readFileSync(USED_TOPICS_FILE, 'utf-8');
+    const data = await fs.readFile(USED_TOPICS_FILE, 'utf-8');
     return JSON.parse(data);
   } catch {
     return [];
@@ -41,7 +40,7 @@ async function getUsedTopics() {
 async function saveUsedTopic(topic) {
   const topics = await getUsedTopics();
   topics.push(topic);
-  fs.writeFileSync(USED_TOPICS_FILE, JSON.stringify(topics.slice(-500), null, 2), 'utf-8');
+  await fs.writeFile(USED_TOPICS_FILE, JSON.stringify(topics.slice(-500), null, 2), 'utf-8');
 }
 
 // === Wisdom Generator ===
