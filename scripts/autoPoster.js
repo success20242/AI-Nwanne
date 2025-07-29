@@ -52,7 +52,10 @@ ${usedTopics.slice(-100).join('\n')}
     temperature: 0.9,
   });
 
-  const text = response.choices[0].message.content.trim();
+  let text = response.choices[0].message.content.trim();
+
+  // Strip any hashtags from the AI output
+  text = text.replace(/#\w+/g, '').replace(/\n{2,}/g, '\n').trim();
 
   const topicMatch = text.match(/(?:“|")(.+?)(?:”|")/);
   if (topicMatch) {
