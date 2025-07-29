@@ -1,14 +1,13 @@
 import axios from 'axios';
 import cron from 'node-cron';
-import fs from 'fs/promises';       // <-- use fs/promises here
+import fs from 'fs/promises';
 import 'dotenv/config';
-import { Configuration, OpenAIApi } from 'openai';
+import OpenAI from 'openai';
 
 // === OpenAI Configuration ===
-const configuration = new Configuration({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
 // === Configuration ===
 const USED_TOPICS_FILE = './used_topics.json';
@@ -59,13 +58,13 @@ Avoid repeating previous topics. Here are past ones:
 ${usedTopics.slice(-100).join('\n')}
 `;
 
-  const response = await openai.createChatCompletion({
+  const response = await openai.chat.completions.create({
     model: 'gpt-3.5-turbo',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.9,
   });
 
-  const text = response.data.choices[0].message.content.trim();
+  const text = response.choices[0].message.content.trim();
 
   const topicMatch = text.match(/(?:“|")(.+?)(?:”|")/);
   if (topicMatch) {
