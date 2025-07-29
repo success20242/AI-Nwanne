@@ -79,7 +79,7 @@ ${usedTopics.slice(-100).join('\n')}
 // === Facebook Posting ===
 async function postToFacebook(content) {
   const pageId = process.env.FB_PAGE_ID;
-  const token = process.env.FB_ACCESS_TOKEN;
+  const token = process.env.FB_PAGE_ACCESS_TOKEN;
 
   const res = await axios.post(
     `https://graph.facebook.com/${pageId}/feed`,
