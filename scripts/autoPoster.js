@@ -12,19 +12,25 @@ const openai = new OpenAI({
 // === Configuration ===
 const USED_TOPICS_FILE = './used_topics.json';
 
-const FIXED_HASHTAGS = ['#AINwanne', '#NaijaCulture', '#AfricanWisdom'];
-const OPTIONAL_HASHTAGS = [
-  '#ProverbPower', '#CulturalHeritage', '#WisdomOfTheDay', '#IgboProverbs',
-  '#YorubaSayings', '#AfricanProverbs', '#TribalWisdom', '#LearnAfrica',
-  '#NigerianCulture', '#WisdomCorner', '#FolkloreLegacy'
-];
+// === Hashtag Configuration ===
+const FIXED_HASHTAGS = ['#AINwanne', '#NaijaCulture', '#AfricanAI'];
 
 // === Helpers ===
-function getHashtags() {
-  const shuffled = OPTIONAL_HASHTAGS.sort(() => 0.5 - Math.random());
-  const selected = shuffled.slice(0, 2); // pick 2 optional
-  const all = [...FIXED_HASHTAGS, ...selected];
-  return all.sort(() => 0.5 - Math.random()).join(' ');
+function extractAIRecommendedHashtag(post) {
+  // Basic pattern: find any tag that starts with # and is not in FIXED_HASHTAGS
+  const found = post.match(/#\w+/g) || [];
+  const custom = found.filter(
+    tag => !FIXED_HASHTAGS.includes(tag)
+  );
+  return custom.length > 0 ? custom[0] : '';
+}
+
+function buildHashtags(aiExtraTag = '') {
+  const allTags = [...FIXED_HASHTAGS];
+  if (aiExtraTag && !FIXED_HASHTAGS.includes(aiExtraTag)) {
+    allTags.push(aiExtraTag);
+  }
+  return allTags.join(' ');
 }
 
 async function getUsedTopics() {
@@ -105,7 +111,8 @@ async function postToTelegram(content) {
 async function runPost() {
   try {
     const post = await generateWisdomPost();
-    const hashtags = getHashtags();
+    const extraTag = extractAIRecommendedHashtag(post);
+    const hashtags = buildHashtags(extraTag);
     const fullPost = `${post}\n\n${hashtags}`;
 
     const fb = await postToFacebook(fullPost);
