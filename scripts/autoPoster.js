@@ -15,24 +15,6 @@ const USED_TOPICS_FILE = './used_topics.json';
 // === Hashtag Configuration ===
 const FIXED_HASHTAGS = ['#AINwanne', '#NaijaCulture', '#AfricanAI'];
 
-// === Helpers ===
-function extractAIRecommendedHashtag(post) {
-  // Basic pattern: find any tag that starts with # and is not in FIXED_HASHTAGS
-  const found = post.match(/#\w+/g) || [];
-  const custom = found.filter(
-    tag => !FIXED_HASHTAGS.includes(tag)
-  );
-  return custom.length > 0 ? custom[0] : '';
-}
-
-function buildHashtags(aiExtraTag = '') {
-  const allTags = [...FIXED_HASHTAGS];
-  if (aiExtraTag && !FIXED_HASHTAGS.includes(aiExtraTag)) {
-    allTags.push(aiExtraTag);
-  }
-  return allTags.join(' ');
-}
-
 async function getUsedTopics() {
   try {
     const data = await fs.readFile(USED_TOPICS_FILE, 'utf-8');
@@ -58,7 +40,7 @@ The format should include:
 1. Heading: "🧠 AI Nwanne – Daily Wisdom"
 2. One powerful African proverb or cultural quote.
 3. A 1-2 sentence explanation in simple English.
-4. End with 4-6 relevant hashtags (must include #AINwanne and #NaijaCulture).
+4. End with 3 hashtags (must be #AINwanne, #NaijaCulture and #AfricanAI ).
 
 Avoid repeating previous topics. Here are past ones:
 ${usedTopics.slice(-100).join('\n')}
@@ -111,8 +93,7 @@ async function postToTelegram(content) {
 async function runPost() {
   try {
     const post = await generateWisdomPost();
-    const extraTag = extractAIRecommendedHashtag(post);
-    const hashtags = buildHashtags(extraTag);
+    const hashtags = FIXED_HASHTAGS.join(' ');
     const fullPost = `${post}\n\n${hashtags}`;
 
     const fb = await postToFacebook(fullPost);
