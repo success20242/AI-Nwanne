@@ -62,7 +62,7 @@ export default async function handler(req, res) {
     } else {
       const prompt = `Reply conversationally and helpfully to this message: ${msg}`;
       const completion = await openai.createChatCompletion({
-        model: "gpt-4o",
+        model: "gpt-3.5-turbo",
         messages: [
           { role: "system", content: "You are a friendly assistant named AI Nwanne who helps with smart, accurate, and culturally aware responses." },
           { role: "user", content: prompt },
