@@ -6,7 +6,7 @@ const redis = new Redis(process.env.REDIS_URL);
 const config = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
 const openai = new OpenAIApi(config);
 
-const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN;
+const VERIFY_TOKEN ="success20242";
 const FACEBOOK_ACCESS_TOKEN = process.env.FACEBOOK_ACCESS_TOKEN;
 
 const COOLDOWN_MS = 60000; // 1 minute cooldown window
