@@ -1,5 +1,6 @@
 import Redis from "ioredis";
 import { Configuration, OpenAIApi } from "openai";
+import fetch from "node-fetch"; // Add this for Node.js < 18 compatibility
 
 const redis = new Redis(process.env.REDIS_URL);
 const COOLDOWN_MS = 3000;
