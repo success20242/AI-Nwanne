@@ -1,204 +1,130 @@
+// === IMPORTS (from your original script) ===
 import axios from 'axios';
 import cron from 'node-cron';
 import fs from 'fs';
 import 'dotenv/config';
-import { translate } from '../lib/translate.js'; // <-- Corrected relative path
+import { Configuration, OpenAIApi } from 'openai';
 
-const LANGUAGES = ["english", "igbo", "hausa", "yoruba"];
-const INTERVAL_HOURS = 6;
-const LOG_FILE = './posted_wisdom.json';
-const INDEX_FILE = './current_index.json';
+// === OpenAI Configuration ===
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(configuration);
 
-let currentIndex = 0;
+// === Configuration ===
+const USED_TOPICS_FILE = './used_topics.json';
 
-// Load current index
-if (fs.existsSync(INDEX_FILE)) {
+const FIXED_HASHTAGS = ['#AINwanne', '#NaijaCulture', '#AfricanWisdom'];
+const OPTIONAL_HASHTAGS = [
+  '#ProverbPower', '#CulturalHeritage', '#WisdomOfTheDay', '#IgboProverbs',
+  '#YorubaSayings', '#AfricanProverbs', '#TribalWisdom', '#LearnAfrica',
+  '#NigerianCulture', '#WisdomCorner', '#FolkloreLegacy'
+];
+
+// === Helpers ===
+function getHashtags() {
+  const shuffled = OPTIONAL_HASHTAGS.sort(() => 0.5 - Math.random());
+  const selected = shuffled.slice(0, 2); // pick 2 optional
+  const all = [...FIXED_HASHTAGS, ...selected];
+  return all.sort(() => 0.5 - Math.random()).join(' ');
+}
+
+async function getUsedTopics() {
   try {
-    const obj = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf-8'));
-    if (typeof obj.currentIndex === 'number') currentIndex = obj.currentIndex;
-  } catch (e) {
-    console.error("⚠️ Failed to parse index file.", e);
+    const data = await fs.readFileSync(USED_TOPICS_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return [];
   }
 }
 
-// Load wisdom log
-let postedWisdoms = [];
-if (fs.existsSync(LOG_FILE)) {
-  try {
-    postedWisdoms = JSON.parse(fs.readFileSync(LOG_FILE, 'utf-8'));
-    if (!Array.isArray(postedWisdoms)) postedWisdoms = [];
-  } catch (e) {
-    console.error("⚠️ Failed to load wisdom log.", e);
-    postedWisdoms = [];
+async function saveUsedTopic(topic) {
+  const topics = await getUsedTopics();
+  topics.push(topic);
+  fs.writeFileSync(USED_TOPICS_FILE, JSON.stringify(topics.slice(-500), null, 2), 'utf-8');
+}
+
+// === Wisdom Generator ===
+async function generateWisdomPost() {
+  const usedTopics = await getUsedTopics();
+
+  const prompt = `
+Generate a short African wisdom post for a daily cultural page titled "AI Nwanne". 
+The format should include:
+1. Heading: "🧠 AI Nwanne – Daily Wisdom"
+2. One powerful African proverb or cultural quote.
+3. A 1-2 sentence explanation in simple English.
+4. End with 4-6 relevant hashtags (must include #AINwanne and #NaijaCulture).
+
+Avoid repeating previous topics. Here are past ones:
+${usedTopics.slice(-100).join('\n')}
+`;
+
+  const response = await openai.createChatCompletion({
+    model: 'gpt-4',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.9,
+  });
+
+  const text = response.data.choices[0].message.content.trim();
+
+  const topicMatch = text.match(/(?:“|")(.+?)(?:”|")/);
+  if (topicMatch) {
+    await saveUsedTopic(topicMatch[1]);
   }
+
+  return text;
 }
 
-function saveWisdomLog(wisdom) {
-  postedWisdoms.push(wisdom);
+// === Facebook Posting ===
+async function postToFacebook(content) {
+  const pageId = process.env.FB_PAGE_ID;
+  const token = process.env.FB_ACCESS_TOKEN;
+
+  const res = await axios.post(
+    `https://graph.facebook.com/${pageId}/feed`,
+    new URLSearchParams({ message: content, access_token: token }),
+  );
+  return res.data;
+}
+
+// === Telegram Posting ===
+async function postToTelegram(content) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  const res = await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+    chat_id: chatId,
+    text: content,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  });
+
+  return res.data;
+}
+
+// === MAIN ===
+async function runPost() {
   try {
-    fs.writeFileSync(LOG_FILE, JSON.stringify(postedWisdoms, null, 2));
-  } catch (e) {
-    console.error("❌ Failed to save wisdom log:", e);
-  }
-}
+    const post = await generateWisdomPost();
+    const hashtags = getHashtags();
+    const fullPost = `${post}\n\n${hashtags}`;
 
-function saveCurrentIndex(index) {
-  try {
-    fs.writeFileSync(INDEX_FILE, JSON.stringify({ currentIndex: index }, null, 2));
-  } catch (e) {
-    console.error("❌ Failed to save index file:", e);
-  }
-}
+    const fb = await postToFacebook(fullPost);
+    console.log('✅ Posted to Facebook:', fb.id);
 
-function hasBeenPosted(wisdom) {
-  if (!wisdom || !wisdom.trim) return false;
-  return postedWisdoms.some(w => w.trim() === wisdom.trim());
-}
-
-// Helper to get ISO code for translation API
-function getLangCode(language) {
-  const lang = language.toLowerCase();
-  if (lang === "yoruba") return "yo";
-  if (lang === "hausa") return "ha";
-  if (lang === "igbo") return "ig";
-  if (lang === "english") return "en";
-  return lang.slice(0, 2);
-}
-
-async function generateWisdom(language) {
-  // Always generate in English
-  const systemPrompt = `You are AI Nwanne, an intelligent African cultural assistant.
-Write a SHORT, stylish, and culturally rich message exploring traditional wisdom or values in ENGLISH only. The output must be concise, clear, and formatted with a bold header. Use authentic phrasing.`;
-
-  const userPrompt = `Give a culturally rich, SHORT *question and answer* in ENGLISH about traditional beliefs or values. Only reply in ENGLISH. Include a bold title or header and use authentic, natural expression.`;
-
-  try {
-    const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.7,
-        max_tokens: 350
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    const englishWisdom = response.data.choices[0]?.message?.content?.trim() ?? null;
-    if (!englishWisdom) return null;
-
-    // Now use your translation module to get native version
-    let nativeTranslation = englishWisdom;
-    if (language.toLowerCase() !== "english") {
-      try {
-        const langCode = getLangCode(language);
-        nativeTranslation = await translate(englishWisdom, langCode, "en");
-      } catch (err) {
-        console.error("❌ Wisdom translation failed:", err);
-        nativeTranslation = "[Translation unavailable]";
-      }
-    }
-
-    // Format the result: English first, then native
-    return `*ENGLISH*: ${englishWisdom}\n\n*${language.toUpperCase()}*: ${nativeTranslation}`;
-  } catch (error) {
-    console.error("❌ OpenAI Error:", error.response?.data || error.message);
-    return null;
-  }
-}
-
-async function postToFacebook(message) {
-  if (!message) return;
-  if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) {
-    console.error("❌ Facebook env vars not set.");
-    return;
-  }
-  const payload = {
-    message: `🧠 *AI Nwanne - Daily Wisdom* 📚\n\n${message}\n\n#AINwanne #AfricanAI #NaijaCulture`,
-    access_token: process.env.FACEBOOK_PAGE_ACCESS_TOKEN
-  };
-
-  try {
-    const res = await axios.post(
-      `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/feed`,
-      payload
-    );
-    if (res.data && res.data.id) {
-      console.log("✅ Facebook post successful:", res.data.id);
-    } else {
-      throw new Error("No post ID returned");
-    }
+    const tg = await postToTelegram(fullPost);
+    console.log('✅ Posted to Telegram:', tg.message_id);
   } catch (err) {
-    console.error("❌ Facebook Error:", err.response?.data || err.message);
+    console.error('❌ Error:', err.response?.data || err.message);
   }
 }
 
-async function postToTelegram(message) {
-  if (!message) return;
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
-    console.error("❌ Telegram env vars not set.");
-    return;
-  }
+// === Schedule it to run every 6 hours ===
+cron.schedule('0 */6 * * *', () => {
+  console.log('🕐 Scheduled run starting...');
+  runPost();
+});
 
-  const payload = {
-    chat_id: process.env.TELEGRAM_CHAT_ID,
-    text: `🧠 *AI Nwanne - Daily Wisdom*\n\n${message}\n\n#AINwanne #AfricanAI #NaijaCulture`,
-    parse_mode: "Markdown"
-  };
-
-  try {
-    const res = await axios.post(
-      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-      payload
-    );
-    if (res.data && res.data.ok) {
-      console.log("✅ Telegram post successful:", res.data.result?.message_id ?? true);
-    } else {
-      throw new Error("Telegram API did not return ok");
-    }
-  } catch (err) {
-    console.error("❌ Telegram Error:", err.response?.data || err.message);
-  }
-}
-
-async function runScheduler() {
-  const lang = LANGUAGES[currentIndex];
-  console.log(`🕐 Generating wisdom for: ${lang.toUpperCase()}`);
-
-  let wisdom = await generateWisdom(lang);
-  let attempts = 0;
-
-  // Avoid duplicate posts, try up to 3 times
-  while (wisdom && hasBeenPosted(wisdom) && attempts < 3) {
-    console.warn("♻️ Duplicate detected. Trying again...");
-    wisdom = await generateWisdom(lang);
-    attempts++;
-  }
-
-  if (wisdom && !hasBeenPosted(wisdom)) {
-    await postToFacebook(wisdom);
-    await postToTelegram(wisdom);
-    saveWisdomLog(wisdom);
-  } else {
-    console.warn("⚠️ Could not generate unique wisdom after multiple attempts.");
-  }
-
-  currentIndex = (currentIndex + 1) % LANGUAGES.length;
-  saveCurrentIndex(currentIndex);
-}
-
-// Startup log
-console.log("🚀 AI Nwanne Wisdom Scheduler started");
-
-// Initial run
-runScheduler();
-
-// Scheduled every 6 hours
-cron.schedule('0 */6 * * *', runScheduler);
+// Run immediately on startup
+runPost();
