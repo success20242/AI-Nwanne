@@ -36,13 +36,13 @@ async function generateWisdomPost() {
 
   const prompt = `
 Generate a short African wisdom post for a daily cultural page titled "AI Nwanne". 
-The format should include:
+The post must follow this format:
 1. Heading: "🧠 AI Nwanne – Daily Wisdom"
-2. One powerful African proverb or cultural quote.
-3. A 1-2 sentence explanation in simple English.
+2. A powerful African proverb or cultural saying (use quotation marks).
+3. A short explanation (1–2 sentences) in simple, clear English that explains the meaning or lesson.
+   Make sure the proverb or cultural saying is original or authentic, rooted in African heritage, and not repeated until after one month.
 4. End with 3 hashtags (must be #AINwanne, #NaijaCulture and #AfricanAI ).
-
-Avoid repeating previous topics. Here are past ones:
+   Avoid repeating previous topics until after one month. Here are past ones:
 ${usedTopics.slice(-100).join('\n')}
 `;
 
