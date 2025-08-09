@@ -34,16 +34,43 @@ async function saveUsedTopic(topic) {
 async function generateWisdomPost() {
   const usedTopics = await getUsedTopics();
 
-  const prompt = `
-Generate a short African wisdom or art post for a daily cultural page titled "AI Nwanne". 
-The post must follow this format:
+ const prompt = `
+You are an African culture and heritage writer.
+
+Task:
+Create a short, authentic, and visually memorable cultural wisdom post for the daily series titled "AI Nwanne".
+
+Audience:
+An international social media audience, including people unfamiliar with African traditions.
+
+Language:
+English – simple, clear, and easy to understand.
+
+Tone & Style:
+Warm, inspiring, culturally respectful, and creatively engaging.
+
+Creativity Constraint:
+- Use vivid imagery, sensory details, or metaphors in the explanation so the reader can visualize or emotionally connect with the wisdom.
+- Ensure the proverb feels alive and carries emotional weight without altering its authentic meaning.
+
+Output Format:
 1. Heading: "🧠 AI Nwanne – Daily Wisdom"
-2. A powerful African proverb or cultural saying (use quotation marks).
-3. A short explanation (1–2 sentences) in simple, clear English that explains the meaning or lesson.
-   Make sure the proverb or cultural saying is original or authentic, rooted in African heritage, and not repeated until after one month.
-4. End with 3 hashtags (must include #AINwanne).
-   Avoid repeating previous topics until after one month. Here are past ones:
+2. A powerful and authentic African proverb or cultural saying (use quotation marks). 
+   - Must be genuine, rooted in African heritage, and suitable for all audiences.
+   - Avoid any proverb or theme that has been used in the past 30 days.
+3. A short explanation (1–2 sentences) in plain English that explains the meaning or moral of the proverb, using creative and vivid expression.
+4. End with exactly 3 hashtags (must include #AINwanne). 
+   - Hashtags should be relevant to African culture, wisdom, or art.
+
+Avoid repetition:
+Here are the topics already used in the last 100 posts:
 ${usedTopics.slice(-100).join('\n')}
+
+Quality Constraints:
+- Maximum 80 words in total.
+- No invented or fake sayings — must be authentic from African heritage.
+- Explanation must be understandable to both African and non-African readers.
+- Keep cultural respect and accuracy at all times.
 `;
 
   const response = await openai.chat.completions.create({
