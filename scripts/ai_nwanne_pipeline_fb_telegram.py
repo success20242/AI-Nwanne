@@ -46,7 +46,7 @@ Interpretation: {interpretation}
         )
         text = response.choices[0].message.content.strip()
         # Ensure proper punctuation
-        sentences = [s.strip() for s in re.split(r'[.?!]', text) if s.strip()]
+        sentences = [s.strip().capitalize() for s in re.split(r'[.?!]', text) if s.strip()]
         return ". ".join(sentences) + "."
     except Exception as e:
         print(f"[WARN] OpenAI commentary failed: {e}")
@@ -73,42 +73,34 @@ def fetch_random_proverb():
 
 # ------------------- POST FORMATTING -------------------
 
-def escape_markdown(text):
-    """Escape characters for Telegram MarkdownV2"""
-    if not text:
-        return ""
-    escape_chars = r"_*[]()~`>#+-=|{}.!$"
-    return "".join(f"\\{c}" if c in escape_chars else c for c in text)
-
 def format_facebook_post(proverb_data, commentary):
     lines = [
         "🦁 Proverb of the Day 🦁\n",
-        f"🌍 Proverb:\n➡️ {proverb_data['proverb']}",
-        f"📝 Interpretation:\n➡️ {proverb_data['interpretation']}",
-        f"💡 Native Language / Country:\n➡️ {proverb_data['native']}"
+        f"🌍 Proverb:\n➡️ {proverb_data['proverb']}.",
+        f"📝 Interpretation:\n➡️ {proverb_data['interpretation']}.",
+        f"💡 Native Language / Country:\n➡️ {proverb_data['native']}."
     ]
     if proverb_data.get("translation"):
-        lines.append(f"🔤 Translation:\n➡️ {proverb_data['translation']}")
+        lines.append(f"🔤 Translation:\n➡️ {proverb_data['translation']}.")
     if commentary:
         lines.append(f"💬 Commentary:\n➡️ {commentary}")
-    lines.append("\n✨ Share and spread African wisdom! ✨")
+    lines.append("\n✨ Share and spread African wisdom! ✨.")
     lines.append(" ".join(FIXED_HASHTAGS))
     return "\n\n".join(lines)
 
 def format_telegram_post(proverb_data, commentary):
     lines = [
-        "🦁 Proverb of the Day 🦁\n",
-        f"🌍 Proverb:\n➡️ {escape_markdown(proverb_data['proverb'])}",
-        f"📝 Interpretation:\n➡️ {escape_markdown(proverb_data['interpretation'])}",
-        f"💡 Native Language / Country:\n➡️ {escape_markdown(proverb_data['native'])}"
+        "🦁 <b>Proverb of the Day</b> 🦁\n",
+        f"🌍 <b>Proverb:</b>\n➡️ {proverb_data['proverb']}.",
+        f"📝 <b>Interpretation:</b>\n➡️ {proverb_data['interpretation']}.",
+        f"💡 <b>Native Language / Country:</b>\n➡️ {proverb_data['native']}."
     ]
     if proverb_data.get("translation"):
-        lines.append(f"🔤 Translation:\n➡️ {escape_markdown(proverb_data['translation'])}")
+        lines.append(f"🔤 <b>Translation:</b>\n➡️ {proverb_data['translation']}.")
     if commentary:
-        lines.append(f"💬 Commentary:\n➡️ {escape_markdown(commentary)}")
-    lines.append("\n✨ Share and spread African wisdom! ✨")
-    hashtags = " ".join([escape_markdown(tag) for tag in FIXED_HASHTAGS])
-    lines.append(hashtags)
+        lines.append(f"💬 <b>Commentary:</b>\n➡️ {commentary}")
+    lines.append("\n✨ Share and spread African wisdom! ✨.")
+    lines.append(" ".join(FIXED_HASHTAGS))
     return "\n\n".join(lines)
 
 # ------------------- FACEBOOK & TELEGRAM -------------------
@@ -126,14 +118,27 @@ def post_to_telegram(content):
     payload = {
         "chat_id": TG_CHAT_ID,
         "text": content,
-        "parse_mode": "MarkdownV2",
+        "parse_mode": "HTML",  # primary mode
         "disable_web_page_preview": True
     }
     resp = requests.post(url, json=payload)
+
     if resp.ok:
         print(f"✅ Posted to Telegram: {resp.json()['result']['message_id']}")
     else:
-        print(f"❌ Telegram error: {resp.text}")
+        print(f"⚠️ Telegram HTML failed: {resp.text}")
+        # fallback: retry with plain text
+        fallback_payload = {
+            "chat_id": TG_CHAT_ID,
+            "text": re.sub(r"<[^>]*>", "", content),  # strip HTML tags
+            "parse_mode": None,
+            "disable_web_page_preview": True
+        }
+        retry = requests.post(url, json=fallback_payload)
+        if retry.ok:
+            print(f"✅ Fallback posted to Telegram: {retry.json()['result']['message_id']}")
+        else:
+            print(f"❌ Telegram error after fallback: {retry.text}")
 
 # ------------------- MAIN PIPELINE -------------------
 
