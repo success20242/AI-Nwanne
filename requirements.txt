@@ -1,0 +1,4 @@
+python-dotenv
+openai==0.27.10
+requests
+feedparser
