@@ -35,8 +35,8 @@ CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
 # Feed & posting limits
-FEED_HOURS_BACK = int(os.getenv("FEED_HOURS_BACK", 72))
-MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", 2))
+FEED_HOURS_BACK = 72
+MAX_POSTS_PER_RUN = 2
 
 # Wisdom Sources (RSS feed URLs)
 WISDOM_FEEDS = [
@@ -45,7 +45,7 @@ WISDOM_FEEDS = [
     "https://newafricanmagazine.com/feed",
     "https://africa.com/feed",
     "https://allafrica.com/misc/tools/rss.html"
-] update them in this full code file
+]
 
 # ------------------- HELPERS -------------------
 
@@ -68,12 +68,9 @@ def save_used_topic(topic):
 def hash_text(text):
     return hashlib.md5(text.encode()).hexdigest()
 
-# ------------------- FETCH WISDOM -------------------
-
 def fetch_wisdom_from_feeds():
     entries = []
     cutoff_time = datetime.utcnow() - timedelta(hours=FEED_HOURS_BACK)
-
     for feed_url in WISDOM_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
@@ -91,6 +88,7 @@ def fetch_wisdom_from_feeds():
 
                 if title:
                     entries.append({"title": title, "summary": summary, "link": link})
+
         except Exception as e:
             print(f"[WARN] Failed to parse feed {feed_url}: {e}")
 
@@ -199,10 +197,8 @@ def post_to_telegram(content):
 
 def run_pipeline():
     wisdom_entries = fetch_wisdom_from_feeds()
-
-    # If no feed entries, generate fallback posts
     if not wisdom_entries:
-        wisdom_entries = [{"title": "", "summary": "", "link": ""} for _ in range(MAX_POSTS_PER_RUN)]
+        wisdom_entries = [{"title": "", "summary": "", "link": ""}]
 
     posted_hashes = set()
     posts_done = 0
@@ -232,7 +228,7 @@ def run_pipeline():
             explanation_line = next((l for l in lines if l.startswith("Explanation:")), "")
             commentary_lines = [l for l in lines if l.startswith("-")]
 
-            # Facebook post
+            # Facebook post (plain, readable)
             fb_post = "\n".join([proverb_line, explanation_line, ""] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)])
             if img_text:
                 fb_post = img_text + fb_post
