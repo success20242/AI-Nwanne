@@ -4,15 +4,24 @@
 
 import os
 import json
+import random
 import hashlib
 import requests
-import feedparser
+import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
+# Optional OpenAI enrichment
+from openai import OpenAI
 
 load_dotenv()
 
 # ------------------- CONFIG -------------------
+
+USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if USE_OPENAI:
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
 USED_TOPICS_FILE = "used_topics.json"
 MAX_TOPIC_MEMORY = 500
@@ -26,24 +35,7 @@ FB_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 TG_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Optional image support
-USE_IMAGE = os.getenv("USE_IMAGE", "False").lower() == "true"
-CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
-CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
-CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
-
-# Feed & posting limits
-FEED_HOURS_BACK = 72
 MAX_POSTS_PER_RUN = 2
-
-# Wisdom Sources (RSS feed URLs)
-WISDOM_FEEDS = [
-    "https://www.afriprov.com/rss",
-    "https://feeds.buzzsprout.com/2464633.rss",
-    "https://newafricanmagazine.com/feed",
-    "https://africa.com/feed",
-    "https://allafrica.com/misc/tools/rss.html"
-]
 
 # ------------------- HELPERS -------------------
 
@@ -66,153 +58,99 @@ def save_used_topic(topic):
 def hash_text(text):
     return hashlib.md5(text.encode()).hexdigest()
 
-def fetch_wisdom_from_feeds():
-    entries = []
-    cutoff_time = datetime.utcnow() - timedelta(hours=FEED_HOURS_BACK)
-    for feed_url in WISDOM_FEEDS:
-        try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries:
-                title = entry.get("title", "").strip()
-                summary = entry.get("summary", "").strip()
-                link = entry.get("link", "").strip()
+def clean_text(raw_html):
+    return re.sub('<.*?>', '', raw_html).strip()
 
-                published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-                if published_parsed:
-                    entry_time = datetime(*published_parsed[:6])
-                    if entry_time < cutoff_time:
-                        continue
+def load_wisdom_list():
+    """Load proverbs from local JSON file"""
+    if not os.path.exists("wisdom.json"):
+        return []
+    with open("wisdom.json", "r", encoding="utf-8") as f:
+        return json.load(f)
 
-                if title:
-                    entries.append({"title": title, "summary": summary, "link": link})
+def pick_wisdom():
+    """Select random unused proverbs"""
+    used = get_used_topics()
+    all_wisdom = load_wisdom_list()
+    unused = [w for w in all_wisdom if w not in used]
+    if not unused:
+        unused = all_wisdom  # allow reuse if exhausted
+    return random.choice(unused)
 
-        except Exception as e:
-            print(f"[WARN] Failed to parse feed {feed_url}: {e}")
+def automatic_commentary(wisdom):
+    """Generate short automatic commentary with emojis"""
+    emojis = ["🌍", "🗣️", "💡", "🤝", "🌿", "📖"]
+    return [
+        f"Reflect on this {random.choice(emojis)}: {wisdom}",
+        f"This teaches us {random.choice(emojis)}: {wisdom}",
+        f"Share and spread African wisdom {random.choice(emojis)}!"
+    ]
 
-    return entries[:MAX_POSTS_PER_RUN]
-
-# ------------------- AUTOMATIC COMMENTARY -------------------
-
-def automatic_commentary(title, summary):
-    """Generate simple commentary without OpenAI, with fallback if summary is missing."""
-    if summary:
-        comments = [
-            f"Reflect on this: {title}.",
-            f"This proverb teaches us: {summary}",
-            "Share and spread African culture with your friends!"
-        ]
-    else:
-        comments = [
-            f"Reflect on this African wisdom: {title}.",
-            "Consider how this saying can guide your day.",
-            "Share this knowledge and inspire others!"
-        ]
-    return comments
-
-# ------------------- CLOUDINARY IMAGE -------------------
-
-def upload_image_to_cloudinary(image_url):
-    if not (CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET):
-        return None
-    upload_url = f"https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/image/upload"
+def ai_commentary(wisdom):
+    """Optional: use OpenAI to generate a 1-2 sentence commentary"""
+    if not USE_OPENAI:
+        return automatic_commentary(wisdom)
+    
+    prompt = f"Provide a short (1-2 sentences) insightful commentary on this African proverb: '{wisdom}'. Include a relevant emoji."
     try:
-        resp = requests.post(
-            upload_url,
-            data={"file": image_url, "upload_preset": "ml_default"},
-            auth=(CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET)
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.9
         )
-        resp.raise_for_status()
-        return resp.json().get("secure_url")
+        text = response.choices[0].message.content.strip()
+        # Split into 3 lines for social media formatting
+        lines = [f"💭 {text}"] + automatic_commentary(wisdom)[1:]
+        return lines
     except Exception as e:
-        print(f"[ERROR] Cloudinary upload failed: {e}")
-        return None
+        print(f"[WARN] OpenAI commentary failed: {e}")
+        return automatic_commentary(wisdom)
 
-# ------------------- FACEBOOK -------------------
+# ------------------- POSTING -------------------
 
 def post_to_facebook(content):
     url = f"https://graph.facebook.com/{FB_PAGE_ID}/feed"
     resp = requests.post(url, data={"message": content, "access_token": FB_ACCESS_TOKEN})
     if resp.ok:
         print(f"✅ Posted to Facebook: {resp.json().get('id')}")
-        return resp.json()
     else:
         print(f"❌ Facebook error: {resp.text}")
-        return None
-
-# ------------------- TELEGRAM -------------------
 
 def post_to_telegram(content):
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TG_CHAT_ID,
-        "text": content,
-        "parse_mode": "MarkdownV2",
-        "disable_web_page_preview": True
-    }
+    # Escape Telegram MarkdownV2 special characters
+    for ch in r"_*[]()~`>#+-=|{}.!":
+        content = content.replace(ch, f"\\{ch}")
+    payload = {"chat_id": TG_CHAT_ID, "text": content, "parse_mode": "MarkdownV2"}
     resp = requests.post(url, json=payload)
     if resp.ok:
         print(f"✅ Posted to Telegram: {resp.json()['result']['message_id']}")
-        return resp.json()
     else:
         print(f"❌ Telegram error: {resp.text}")
-        return None
 
 # ------------------- MAIN PIPELINE -------------------
 
 def run_pipeline():
-    wisdom_entries = fetch_wisdom_from_feeds()
-    if not wisdom_entries:
-        print("[INFO] No new wisdom entries found in feeds.")
-        return
-
-    posted_hashes = set()
     posts_done = 0
+    posted_hashes = set()
+    
+    while posts_done < MAX_POSTS_PER_RUN:
+        wisdom = pick_wisdom()
+        save_used_topic(wisdom)
 
-    for entry in wisdom_entries:
-        if posts_done >= MAX_POSTS_PER_RUN:
-            break
-        try:
-            title = entry["title"]
-            summary = entry.get("summary", "")
-            link = entry.get("link", "")
+        commentary_lines = ai_commentary(wisdom)
+        content_lines = [f"📝 Proverb: {wisdom}"] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)]
+        post_text = "\n".join(content_lines)
 
-            # Deduplicate by title hash
-            content_hash = hash_text(title)
-            if content_hash in posted_hashes:
-                continue
-            posted_hashes.add(content_hash)
+        # Avoid duplicate in same run
+        content_hash = hash_text(post_text)
+        if content_hash in posted_hashes:
+            continue
+        posted_hashes.add(content_hash)
 
-            # Save used topic to avoid future duplicates
-            save_used_topic(title)
-
-            # Generate automatic commentary
-            commentary_lines = automatic_commentary(title, summary)
-
-            # Optional image
-            img_text = ""
-            if USE_IMAGE and link:
-                cloud_img = upload_image_to_cloudinary(link)
-                if cloud_img:
-                    img_text = f'[Image]({cloud_img})\n\n'
-
-            # Assemble post
-            fb_post = "\n".join([f"Proverb: {title}", f"Explanation: {summary}"] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)])
-            if img_text:
-                fb_post = img_text + fb_post
-
-            # Telegram MarkdownV2 safe
-            tg_post = fb_post
-            for ch in r"_*[]()~`>#+-=|{}.!":
-                tg_post = tg_post.replace(ch, f"\\{ch}")
-
-            # Post to platforms
-            post_to_facebook(fb_post)
-            post_to_telegram(tg_post)
-
-            posts_done += 1
-
-        except Exception as e:
-            print(f"[ERROR] Pipeline failed for entry {entry}: {e}")
+        post_to_facebook(post_text)
+        post_to_telegram(post_text)
+        posts_done += 1
 
 if __name__ == "__main__":
     run_pipeline()
