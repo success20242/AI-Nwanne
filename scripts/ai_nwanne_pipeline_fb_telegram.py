@@ -34,6 +34,10 @@ CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
+# Feed & posting limits
+FEED_HOURS_BACK = int(os.getenv("FEED_HOURS_BACK", 72))
+MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", 2))
+
 # Wisdom Sources (can be JSON file or RSS feed URLs)
 WISDOM_FEEDS = [
     "https://www.afriprov.com/rss",  # placeholder example
@@ -62,6 +66,7 @@ def hash_text(text):
 
 def fetch_wisdom_from_feeds():
     entries = []
+    cutoff_time = datetime.utcnow() - timedelta(hours=FEED_HOURS_BACK)
     for feed_url in WISDOM_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
@@ -69,11 +74,21 @@ def fetch_wisdom_from_feeds():
                 title = entry.get("title", "").strip()
                 summary = entry.get("summary", "").strip()
                 link = entry.get("link", "").strip()
+
+                # Filter by published time if available
+                published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+                if published_parsed:
+                    entry_time = datetime(*published_parsed[:6])
+                    if entry_time < cutoff_time:
+                        continue
+
                 if title:
                     entries.append({"title": title, "summary": summary, "link": link})
+
         except Exception as e:
             print(f"[WARN] Failed to parse feed {feed_url}: {e}")
-    return entries
+
+    return entries[:MAX_POSTS_PER_RUN]
 
 # ------------------- OPENAI -------------------
 
@@ -176,10 +191,13 @@ def post_to_telegram(content):
 
 def run_pipeline():
     wisdom_entries = fetch_wisdom_from_feeds()
-    if not wisdom_entries:
-        wisdom_entries = [{"title": "", "summary": "", "link": ""}]
 
-    for entry in wisdom_entries:
+    # If no feed entries, generate fallback posts up to MAX_POSTS_PER_RUN
+    if not wisdom_entries:
+        wisdom_entries = [{"title": "", "summary": "", "link": ""} for _ in range(MAX_POSTS_PER_RUN)]
+
+    # Ensure only MAX_POSTS_PER_RUN posts are processed
+    for entry in wisdom_entries[:MAX_POSTS_PER_RUN]:
         try:
             content = generate_wisdom_content(entry["title"], entry["summary"], entry["link"])
 
