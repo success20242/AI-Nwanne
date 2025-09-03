@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 # ai_nwanne_pipeline_fb_telegram.py
-# African wisdom daily bot: fetch, generate commentary, post to FB + Telegram
+# African wisdom daily bot: fetch, generate commentary, handle images, post to FB + Telegram
 
 import os
+import json
 import requests
 from dotenv import load_dotenv
-from random import choice
+from openai import OpenAI
+import re
 
 load_dotenv()
 
 # ------------------- CONFIG -------------------
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FIXED_HASHTAGS = ["#AINwanne", "#NaijaCulture", "#AfricanAI"]
 
 # Facebook
@@ -20,78 +24,92 @@ FB_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 TG_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# African proverbs API
-PROVERB_API_URL = "https://africanproverbs.onrender.com/api/proverb"
+# ------------------- OPENAI -------------------
 
-# ------------------- HELPERS -------------------
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+def generate_commentary(proverb, interpretation):
+    """Generate a short, 2-3 sentence commentary on the proverb."""
+    prompt = f"""
+You are an African cultural writer. Provide a short, insightful, and engaging commentary (2-3 sentences)
+on this proverb. Ensure each sentence ends with a period. Keep it suitable for social media.
+
+Proverb: {proverb}
+Interpretation: {interpretation}
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.8,
+            max_tokens=150
+        )
+        text = response.choices[0].message.content.strip()
+        # Ensure proper punctuation
+        sentences = [s.strip() for s in re.split(r'[.?!]', text) if s.strip()]
+        return ". ".join(sentences) + "."
+    except Exception as e:
+        print(f"[WARN] OpenAI commentary failed: {e}")
+        return ""
+
+# ------------------- PROVERB FETCH -------------------
 
 def fetch_random_proverb():
-    """Fetch a fresh proverb from the API."""
+    """Fetch a fresh random proverb from the API"""
     try:
-        resp = requests.get(PROVERB_API_URL)
-        if resp.ok:
-            data = resp.json()
-            proverb = data.get("proverb", "").strip()
-            interpretation = data.get("interpretation", "").strip()
-            native = data.get("native", "").strip()
-            translations = data.get("translations", [])
-            translation_text = translations[0]["proverb"] if translations else ""
-            
-            # Capitalize the first letter of the proverb
-            if proverb:
-                proverb = proverb[0].upper() + proverb[1:]
-
-            return {
-                "proverb": proverb,
-                "interpretation": interpretation,
-                "native": native,
-                "translation": translation_text
-            }
+        resp = requests.get("https://africanproverbs.onrender.com/api/proverb")
+        resp.raise_for_status()
+        data = resp.json()
+        proverb_data = {
+            "proverb": data.get("proverb", "").capitalize(),
+            "interpretation": data.get("interpretation", "").capitalize(),
+            "native": data.get("native", "").capitalize(),
+            "translation": data.get("translations", [{}])[0].get("proverb", "").capitalize() if data.get("translations") else None
+        }
+        return proverb_data
     except Exception as e:
         print(f"[ERROR] Failed to fetch proverb: {e}")
-    return None
+        return None
 
-# ------------------- FORMATTING -------------------
+# ------------------- POST FORMATTING -------------------
 
-def format_facebook_post(proverb_data):
-    """Format a professional Facebook post."""
+def escape_markdown(text):
+    """Escape characters for Telegram MarkdownV2"""
+    escape_chars = r"_*[]()~`>#+-=|{}.!$"
+    return "".join(f"\\{c}" if c in escape_chars else c for c in text)
+
+def format_facebook_post(proverb_data, commentary):
     lines = [
-        f"🦁 Proverb of the Day 🦁\n",
-        f"🌍 Proverb:\n➡️ {proverb_data['proverb']}\n",
-        f"📝 Interpretation:\n➡️ {proverb_data['interpretation']}\n",
+        "🦁 Proverb of the Day 🦁\n",
+        f"🌍 Proverb:\n➡️ {proverb_data['proverb']}",
+        f"📝 Interpretation:\n➡️ {proverb_data['interpretation']}",
         f"💡 Native Language / Country:\n➡️ {proverb_data['native']}"
     ]
     if proverb_data.get("translation"):
         lines.append(f"🔤 Translation:\n➡️ {proverb_data['translation']}")
-
+    if commentary:
+        lines.append(f"💬 Commentary:\n➡️ {commentary}")
     lines.append("\n✨ Share and spread African wisdom! ✨")
     lines.append(" ".join(FIXED_HASHTAGS))
     return "\n\n".join(lines)
 
-
-def format_telegram_post(proverb_data):
-    """Format a Telegram post with MarkdownV2 escape."""
-    def escape_markdown(text):
-        # Only escape Telegram MarkdownV2 special chars
-        escape_chars = r"_*[]()~`>#+-=|{}.!\""
-        for ch in escape_chars:
-            text = text.replace(ch, f"\\{ch}")
-        return text
-
+def format_telegram_post(proverb_data, commentary):
     lines = [
         "🦁 Proverb of the Day 🦁\n",
-        f"🌍 Proverb:\n➡️ {escape_markdown(proverb_data['proverb'])}\n",
-        f"📝 Interpretation:\n➡️ {escape_markdown(proverb_data['interpretation'])}\n",
+        f"🌍 Proverb:\n➡️ {escape_markdown(proverb_data['proverb'])}",
+        f"📝 Interpretation:\n➡️ {escape_markdown(proverb_data['interpretation'])}",
         f"💡 Native Language / Country:\n➡️ {escape_markdown(proverb_data['native'])}"
     ]
     if proverb_data.get("translation"):
         lines.append(f"🔤 Translation:\n➡️ {escape_markdown(proverb_data['translation'])}")
-
+    if commentary:
+        lines.append(f"💬 Commentary:\n➡️ {escape_markdown(commentary)}")
     lines.append("\n✨ Share and spread African wisdom! ✨")
-    lines.append(" ".join(FIXED_HASHTAGS))
+    hashtags = " ".join([escape_markdown(tag) for tag in FIXED_HASHTAGS])
+    lines.append(hashtags)
     return "\n\n".join(lines)
 
-# ------------------- POSTING -------------------
+# ------------------- FACEBOOK & TELEGRAM -------------------
 
 def post_to_facebook(content):
     url = f"https://graph.facebook.com/{FB_PAGE_ID}/feed"
@@ -115,20 +133,20 @@ def post_to_telegram(content):
     else:
         print(f"❌ Telegram error: {resp.text}")
 
-# ------------------- PIPELINE -------------------
+# ------------------- MAIN PIPELINE -------------------
 
 def run_pipeline():
     proverb_data = fetch_random_proverb()
     if not proverb_data:
-        print("[WARN] No proverb fetched. Exiting.")
+        print("[INFO] No proverb fetched. Exiting.")
         return
 
-    fb_post = format_facebook_post(proverb_data)
-    tg_post = format_telegram_post(proverb_data)
+    commentary = generate_commentary(proverb_data["proverb"], proverb_data["interpretation"])
+    fb_post = format_facebook_post(proverb_data, commentary)
+    tg_post = format_telegram_post(proverb_data, commentary)
 
     post_to_facebook(fb_post)
     post_to_telegram(tg_post)
-
 
 if __name__ == "__main__":
     run_pipeline()
