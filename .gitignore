@@ -1,24 +1,28 @@
-# Node modules folder
-node_modules/
+# ----------------
+# Python
+# ----------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.egg-info/
+*.egg
+venv/
+env/
+ENV/
 
 # Logs
 logs
 *.log
-npm-debug.log*
 
 # Environment files
 .env
-
-# Next.js build output
-.next/
-out/
+.env.local
 
 # Optional Mac system files
 .DS_Store
 
-# Vercel folder
-.vercel
-.env
-.env.local
+# Custom JSON files
 current_index.json
 posted_wisdom.json
