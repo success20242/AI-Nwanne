@@ -1,4 +1,4 @@
-python-dotenv
-openai==0.27.10
-requests
-feedparser
+python-dotenv>=1.0.0
+feedparser>=6.0.10
+requests>=2.32.0
+openai>=4.104.0
