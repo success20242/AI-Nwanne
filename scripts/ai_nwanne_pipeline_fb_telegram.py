@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
 # ai_nwanne_pipeline_fb_telegram.py
-# African wisdom daily bot: fetch, generate commentary, handle images, post to FB + Telegram
+# African wisdom daily bot: fetch multiple fresh proverbs, generate commentary, post to FB + Telegram
 
 import os
-import json
 import random
-import hashlib
 import requests
-import re
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
-
-# Optional OpenAI enrichment
-from openai import OpenAI
 
 load_dotenv()
 
 # ------------------- CONFIG -------------------
 
-USE_OPENAI = os.getenv("USE_OPENAI", "False").lower() == "true"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if USE_OPENAI:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-USED_TOPICS_FILE = "used_topics.json"
-MAX_TOPIC_MEMORY = 500
 FIXED_HASHTAGS = ["#AINwanne", "#NaijaCulture", "#AfricanAI"]
 
 # Facebook
@@ -35,122 +21,138 @@ FB_ACCESS_TOKEN = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
 TG_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-MAX_POSTS_PER_RUN = 2
+# Optional image support
+USE_IMAGE = os.getenv("USE_IMAGE", "False").lower() == "true"
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
-# ------------------- HELPERS -------------------
+# Number of proverbs to fetch per run
+NUM_PROVERBS_PER_RUN = 3
 
-def get_used_topics():
-    if not os.path.exists(USED_TOPICS_FILE):
-        return []
+# ------------------- AFRICAN PROVERBS API -------------------
+
+API_URL_RANDOM = "https://africanproverbs.onrender.com/api/proverb"
+
+def fetch_random_proverb():
+    """
+    Fetch a single random African proverb.
+    """
     try:
-        with open(USED_TOPICS_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-def save_used_topic(topic):
-    topics = get_used_topics()
-    topics.append(topic)
-    topics = topics[-MAX_TOPIC_MEMORY:]
-    with open(USED_TOPICS_FILE, "w") as f:
-        json.dump(topics, f, indent=2)
-
-def hash_text(text):
-    return hashlib.md5(text.encode()).hexdigest()
-
-def clean_text(raw_html):
-    return re.sub('<.*?>', '', raw_html).strip()
-
-def load_wisdom_list():
-    """Load proverbs from local JSON file"""
-    if not os.path.exists("wisdom.json"):
-        return []
-    with open("wisdom.json", "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def pick_wisdom():
-    """Select random unused proverbs"""
-    used = get_used_topics()
-    all_wisdom = load_wisdom_list()
-    unused = [w for w in all_wisdom if w not in used]
-    if not unused:
-        unused = all_wisdom  # allow reuse if exhausted
-    return random.choice(unused)
-
-def automatic_commentary(wisdom):
-    """Generate short automatic commentary with emojis"""
-    emojis = ["🌍", "🗣️", "💡", "🤝", "🌿", "📖"]
-    return [
-        f"Reflect on this {random.choice(emojis)}: {wisdom}",
-        f"This teaches us {random.choice(emojis)}: {wisdom}",
-        f"Share and spread African wisdom {random.choice(emojis)}!"
-    ]
-
-def ai_commentary(wisdom):
-    """Optional: use OpenAI to generate a 1-2 sentence commentary"""
-    if not USE_OPENAI:
-        return automatic_commentary(wisdom)
-    
-    prompt = f"Provide a short (1-2 sentences) insightful commentary on this African proverb: '{wisdom}'. Include a relevant emoji."
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.9
-        )
-        text = response.choices[0].message.content.strip()
-        # Split into 3 lines for social media formatting
-        lines = [f"💭 {text}"] + automatic_commentary(wisdom)[1:]
-        return lines
+        resp = requests.get(API_URL_RANDOM)
+        if resp.ok:
+            data = resp.json()
+            proverb = data.get("proverb", "")
+            interpretation = data.get("interpretation", "")
+            native = data.get("native", "")
+            translation = ""
+            translations = data.get("translations", [])
+            if translations:
+                translation = translations[0].get("proverb", "")
+            return {
+                "proverb": proverb,
+                "interpretation": interpretation,
+                "native": native,
+                "translation": translation
+            }
+        else:
+            print(f"[ERROR] Failed to fetch proverb: {resp.status_code}")
+            return None
     except Exception as e:
-        print(f"[WARN] OpenAI commentary failed: {e}")
-        return automatic_commentary(wisdom)
+        print(f"[ERROR] Exception fetching proverb: {e}")
+        return None
 
-# ------------------- POSTING -------------------
+# ------------------- COMMENTARY GENERATION -------------------
+
+EMOJIS = ["🌍", "💡", "📝", "🗣️", "✨", "🔥", "🌿", "🌞", "🌟", "📜"]
+
+def generate_commentary(proverb_obj):
+    """
+    Generate engaging commentary for the proverb with random emojis.
+    """
+    # pick 3 random emojis for this post
+    emoji_sample = random.sample(EMOJIS, 3)
+    commentary = f"{emoji_sample[0]} Proverb: {proverb_obj['proverb']}\n\n"
+    commentary += f"{emoji_sample[1]} Interpretation: {proverb_obj['interpretation']}\n"
+    if proverb_obj['native']:
+        commentary += f"{emoji_sample[2]} Native: {proverb_obj['native']}\n"
+    if proverb_obj['translation']:
+        commentary += f"🔤 Translation: {proverb_obj['translation']}\n"
+    commentary += "\n✨ Share and spread African wisdom!\n"
+    commentary += " ".join(FIXED_HASHTAGS)
+    return commentary
+
+# ------------------- CLOUDINARY IMAGE -------------------
+
+def upload_image_to_cloudinary(image_url):
+    if not (CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET):
+        return None
+    upload_url = f"https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/image/upload"
+    try:
+        resp = requests.post(
+            upload_url,
+            data={"file": image_url, "upload_preset": "ml_default"},
+            auth=(CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET)
+        )
+        resp.raise_for_status()
+        return resp.json().get("secure_url")
+    except Exception as e:
+        print(f"[ERROR] Cloudinary upload failed: {e}")
+        return None
+
+# ------------------- FACEBOOK -------------------
 
 def post_to_facebook(content):
     url = f"https://graph.facebook.com/{FB_PAGE_ID}/feed"
     resp = requests.post(url, data={"message": content, "access_token": FB_ACCESS_TOKEN})
     if resp.ok:
         print(f"✅ Posted to Facebook: {resp.json().get('id')}")
+        return resp.json()
     else:
         print(f"❌ Facebook error: {resp.text}")
+        return None
+
+# ------------------- TELEGRAM -------------------
 
 def post_to_telegram(content):
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
     # Escape Telegram MarkdownV2 special characters
     for ch in r"_*[]()~`>#+-=|{}.!":
         content = content.replace(ch, f"\\{ch}")
-    payload = {"chat_id": TG_CHAT_ID, "text": content, "parse_mode": "MarkdownV2"}
+
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": content,
+        "parse_mode": "MarkdownV2",
+        "disable_web_page_preview": True
+    }
     resp = requests.post(url, json=payload)
     if resp.ok:
         print(f"✅ Posted to Telegram: {resp.json()['result']['message_id']}")
+        return resp.json()
     else:
         print(f"❌ Telegram error: {resp.text}")
+        return None
 
 # ------------------- MAIN PIPELINE -------------------
 
 def run_pipeline():
-    posts_done = 0
-    posted_hashes = set()
-    
-    while posts_done < MAX_POSTS_PER_RUN:
-        wisdom = pick_wisdom()
-        save_used_topic(wisdom)
-
-        commentary_lines = ai_commentary(wisdom)
-        content_lines = [f"📝 Proverb: {wisdom}"] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)]
-        post_text = "\n".join(content_lines)
-
-        # Avoid duplicate in same run
-        content_hash = hash_text(post_text)
-        if content_hash in posted_hashes:
+    for _ in range(NUM_PROVERBS_PER_RUN):
+        proverb_obj = fetch_random_proverb()
+        if not proverb_obj:
+            print("[WARN] No proverb fetched.")
             continue
-        posted_hashes.add(content_hash)
 
-        post_to_facebook(post_text)
-        post_to_telegram(post_text)
-        posts_done += 1
+        content = generate_commentary(proverb_obj)
+
+        # Optional image
+        if USE_IMAGE and proverb_obj.get("link"):
+            cloud_img = upload_image_to_cloudinary(proverb_obj["link"])
+            if cloud_img:
+                content = f"[Image]({cloud_img})\n\n" + content
+
+        post_to_facebook(content)
+        post_to_telegram(content)
 
 if __name__ == "__main__":
     run_pipeline()
