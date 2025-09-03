@@ -9,13 +9,11 @@ import requests
 import feedparser
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
 # ------------------- CONFIG -------------------
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 USED_TOPICS_FILE = "used_topics.json"
 MAX_TOPIC_MEMORY = 500
 FIXED_HASHTAGS = ["#AINwanne", "#NaijaCulture", "#AfricanAI"]
@@ -79,7 +77,6 @@ def fetch_wisdom_from_feeds():
                 summary = entry.get("summary", "").strip()
                 link = entry.get("link", "").strip()
 
-                # Filter by published time if available
                 published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
                 if published_parsed:
                     entry_time = datetime(*published_parsed[:6])
@@ -94,56 +91,23 @@ def fetch_wisdom_from_feeds():
 
     return entries[:MAX_POSTS_PER_RUN]
 
-# ------------------- OPENAI -------------------
+# ------------------- AUTOMATIC COMMENTARY -------------------
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-def generate_wisdom_content(title="", summary="", link=""):
-    used_topics = get_used_topics()
-    last_100 = used_topics[-100:]
-
-    prompt = f"""
-You are an African culture and heritage writer.
-
-Task:
-1. Rewrite or enrich this proverb for a daily social media post:
-Title: {title}
-Summary: {summary}
-Link: {link}
-
-2. Produce a short explanation (1-2 sentences).
-3. Produce a structured commentary (use dashes "-" for bullets) with cultural insights, usage, or tips.
-4. Avoid repeating proverbs used in the last 100 posts:
-{chr(10).join(last_100)}
-
-Constraints:
-- Max 80 words for the post.
-- Must be authentic, culturally accurate, emotionally engaging.
-- Include exactly 3 hashtags (must include #AINwanne).
-
-Output Format:
----
-Proverb: "..."
-Explanation: ...
-Commentary:
-- ...
-- ...
-- ...
----
-"""
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.9
-    )
-
-    text = response.choices[0].message.content.strip()
-    import re
-    match = re.search(r'Proverb:\s*["“](.+?)["”]', text)
-    if match:
-        save_used_topic(match.group(1))
-
-    return text
+def automatic_commentary(title, summary):
+    """Generate simple commentary without OpenAI, with fallback if summary is missing."""
+    if summary:
+        comments = [
+            f"Reflect on this: {title}.",
+            f"This proverb teaches us: {summary}",
+            "Share and spread African culture with your friends!"
+        ]
+    else:
+        comments = [
+            f"Reflect on this African wisdom: {title}.",
+            "Consider how this saying can guide your day.",
+            "Share this knowledge and inspire others!"
+        ]
+    return comments
 
 # ------------------- CLOUDINARY IMAGE -------------------
 
@@ -198,7 +162,8 @@ def post_to_telegram(content):
 def run_pipeline():
     wisdom_entries = fetch_wisdom_from_feeds()
     if not wisdom_entries:
-        wisdom_entries = [{"title": "", "summary": "", "link": ""}]
+        print("[INFO] No new wisdom entries found in feeds.")
+        return
 
     posted_hashes = set()
     posts_done = 0
@@ -207,37 +172,40 @@ def run_pipeline():
         if posts_done >= MAX_POSTS_PER_RUN:
             break
         try:
-            content = generate_wisdom_content(entry["title"], entry["summary"], entry["link"])
+            title = entry["title"]
+            summary = entry.get("summary", "")
+            link = entry.get("link", "")
 
-            # Avoid duplicate posts in same run
-            content_hash = hash_text(content)
+            # Deduplicate by title hash
+            content_hash = hash_text(title)
             if content_hash in posted_hashes:
                 continue
             posted_hashes.add(content_hash)
 
+            # Save used topic to avoid future duplicates
+            save_used_topic(title)
+
+            # Generate automatic commentary
+            commentary_lines = automatic_commentary(title, summary)
+
             # Optional image
             img_text = ""
-            if USE_IMAGE and entry.get("link"):
-                cloud_img = upload_image_to_cloudinary(entry["link"])
+            if USE_IMAGE and link:
+                cloud_img = upload_image_to_cloudinary(link)
                 if cloud_img:
                     img_text = f'[Image]({cloud_img})\n\n'
 
-            # Split content into sections for formatting
-            lines = content.splitlines()
-            proverb_line = next((l for l in lines if l.startswith("Proverb:")), "")
-            explanation_line = next((l for l in lines if l.startswith("Explanation:")), "")
-            commentary_lines = [l for l in lines if l.startswith("-")]
-
-            # Facebook post (plain, readable)
-            fb_post = "\n".join([proverb_line, explanation_line, ""] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)])
+            # Assemble post
+            fb_post = "\n".join([f"Proverb: {title}", f"Explanation: {summary}"] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)])
             if img_text:
                 fb_post = img_text + fb_post
 
-            # Telegram post (MarkdownV2 safe)
+            # Telegram MarkdownV2 safe
             tg_post = fb_post
             for ch in r"_*[]()~`>#+-=|{}.!":
                 tg_post = tg_post.replace(ch, f"\\{ch}")
 
+            # Post to platforms
             post_to_facebook(fb_post)
             post_to_telegram(tg_post)
 
