@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # ai_nwanne_pipeline_fb_telegram.py
-# African wisdom daily bot: fetch multiple fresh proverbs, generate commentary, post to FB + Telegram
+# African wisdom daily bot: fetch, generate commentary, handle images, post to FB + Telegram
 
 import os
-import random
+import json
+import hashlib
 import requests
+import random
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # ------------------- CONFIG -------------------
 
+USED_TOPICS_FILE = "used_topics.json"
+MAX_TOPIC_MEMORY = 500
 FIXED_HASHTAGS = ["#AINwanne", "#NaijaCulture", "#AfricanAI"]
 
 # Facebook
@@ -27,60 +32,93 @@ CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
-# Number of proverbs to fetch per run
-NUM_PROVERBS_PER_RUN = 3
+# African Proverbs API
+PROVERB_API_URL = "https://africanproverbs.onrender.com/api/proverb"
 
-# ------------------- AFRICAN PROVERBS API -------------------
+# ------------------- HELPERS -------------------
 
-API_URL_RANDOM = "https://africanproverbs.onrender.com/api/proverb"
+def get_used_topics():
+    if not os.path.exists(USED_TOPICS_FILE):
+        return []
+    try:
+        with open(USED_TOPICS_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_used_topic(topic):
+    topics = get_used_topics()
+    topics.append(topic)
+    topics = topics[-MAX_TOPIC_MEMORY:]
+    with open(USED_TOPICS_FILE, "w") as f:
+        json.dump(topics, f, indent=2)
+
+def hash_text(text):
+    return hashlib.md5(text.encode()).hexdigest()
+
+def capitalize_sentences(text):
+    # Capitalizes first letter of each sentence
+    sentences = [s.strip().capitalize() for s in text.split('.') if s.strip()]
+    return '. '.join(sentences) + ('.' if sentences else '')
 
 def fetch_random_proverb():
-    """
-    Fetch a single random African proverb.
-    """
     try:
-        resp = requests.get(API_URL_RANDOM)
-        if resp.ok:
-            data = resp.json()
-            proverb = data.get("proverb", "")
-            interpretation = data.get("interpretation", "")
-            native = data.get("native", "")
-            translation = ""
-            translations = data.get("translations", [])
-            if translations:
-                translation = translations[0].get("proverb", "")
-            return {
-                "proverb": proverb,
-                "interpretation": interpretation,
-                "native": native,
-                "translation": translation
-            }
-        else:
-            print(f"[ERROR] Failed to fetch proverb: {resp.status_code}")
-            return None
+        resp = requests.get(PROVERB_API_URL)
+        resp.raise_for_status()
+        data = resp.json()
+        # Check required keys
+        proverb_obj = {
+            'proverb': data.get('proverb', ''),
+            'interpretation': data.get('interpretation', ''),
+            'native': data.get('native', ''),
+            'translation': ''
+        }
+        # Include first translation if exists
+        translations = data.get('translations', [])
+        if translations:
+            proverb_obj['translation'] = translations[0].get('proverb', '')
+        return proverb_obj
     except Exception as e:
-        print(f"[ERROR] Exception fetching proverb: {e}")
+        print(f"[ERROR] Failed to fetch proverb: {e}")
         return None
 
-# ------------------- COMMENTARY GENERATION -------------------
-
-EMOJIS = ["🌍", "💡", "📝", "🗣️", "✨", "🔥", "🌿", "🌞", "🌟", "📜"]
+# ------------------- POST FORMATTING -------------------
 
 def generate_commentary(proverb_obj):
     """
-    Generate engaging commentary for the proverb with random emojis.
+    Generate professional-looking post content with emojis, proper capitalization,
+    and a fun fact section for country/language.
     """
-    # pick 3 random emojis for this post
-    emoji_sample = random.sample(EMOJIS, 3)
-    commentary = f"{emoji_sample[0]} Proverb: {proverb_obj['proverb']}\n\n"
-    commentary += f"{emoji_sample[1]} Interpretation: {proverb_obj['interpretation']}\n"
-    if proverb_obj['native']:
-        commentary += f"{emoji_sample[2]} Native: {proverb_obj['native']}\n"
-    if proverb_obj['translation']:
-        commentary += f"🔤 Translation: {proverb_obj['translation']}\n"
-    commentary += "\n✨ Share and spread African wisdom!\n"
-    commentary += " ".join(FIXED_HASHTAGS)
-    return commentary
+    header_emoji = random.choice(["🌞", "🌟", "🔥", "✨", "🌿", "📜", "🦁", "🌍"])
+    line_emojis = random.sample(["💡", "📝", "🗣️", "🔤", "🌐"], 2)
+
+    # Capitalize the proverb and interpretation
+    proverb_text = capitalize_sentences(proverb_obj['proverb'])
+    interpretation_text = capitalize_sentences(proverb_obj.get('interpretation', ''))
+    translation_text = capitalize_sentences(proverb_obj.get('translation', ''))
+    native_text = proverb_obj.get('native', '')
+
+    lines = []
+    lines.append(f"{header_emoji} *Proverb of the Day* {header_emoji}\n")
+    lines.append(f"🌍 *Proverb:* {proverb_text}")
+
+    if interpretation_text:
+        lines.append(f"{line_emojis[0]} *Interpretation:* {interpretation_text}")
+
+    if native_text:
+        lines.append(f"{line_emojis[1]} *Native Language / Country:* {native_text}")
+
+    if translation_text:
+        lines.append(f"🔤 *Translation:* {translation_text}")
+
+    # Fun fact section
+    if native_text:
+        lines.append(f"💡 *Fun Fact:* This proverb comes from {native_text} and reflects local wisdom.")
+
+    lines.append("\n✨ Share and spread African wisdom!")
+    lines.append(" ".join(FIXED_HASHTAGS))
+
+    return "\n".join(lines)
 
 # ------------------- CLOUDINARY IMAGE -------------------
 
@@ -115,10 +153,6 @@ def post_to_facebook(content):
 # ------------------- TELEGRAM -------------------
 
 def post_to_telegram(content):
-    # Escape Telegram MarkdownV2 special characters
-    for ch in r"_*[]()~`>#+-=|{}.!":
-        content = content.replace(ch, f"\\{ch}")
-
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TG_CHAT_ID,
@@ -126,6 +160,10 @@ def post_to_telegram(content):
         "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True
     }
+    # Escape Telegram MarkdownV2 special characters
+    for ch in r"_*[]()~`>#+-=|{}.!":
+        payload['text'] = payload['text'].replace(ch, f"\\{ch}")
+
     resp = requests.post(url, json=payload)
     if resp.ok:
         print(f"✅ Posted to Telegram: {resp.json()['result']['message_id']}")
@@ -137,22 +175,29 @@ def post_to_telegram(content):
 # ------------------- MAIN PIPELINE -------------------
 
 def run_pipeline():
-    for _ in range(NUM_PROVERBS_PER_RUN):
-        proverb_obj = fetch_random_proverb()
-        if not proverb_obj:
-            print("[WARN] No proverb fetched.")
-            continue
+    proverb_obj = fetch_random_proverb()
+    if not proverb_obj:
+        print("[WARN] No proverb fetched today.")
+        return
 
-        content = generate_commentary(proverb_obj)
+    # Avoid duplicate posts using hash
+    proverb_hash = hash_text(proverb_obj['proverb'])
+    used_hashes = [hash_text(t) for t in get_used_topics()]
+    if proverb_hash in used_hashes:
+        print("[INFO] Proverb already posted previously. Skipping.")
+        return
 
-        # Optional image
-        if USE_IMAGE and proverb_obj.get("link"):
-            cloud_img = upload_image_to_cloudinary(proverb_obj["link"])
-            if cloud_img:
-                content = f"[Image]({cloud_img})\n\n" + content
+    post_content = generate_commentary(proverb_obj)
+    # Optional image
+    if USE_IMAGE and proverb_obj.get("link"):
+        cloud_img = upload_image_to_cloudinary(proverb_obj.get("link"))
+        if cloud_img:
+            post_content = f"[Image]({cloud_img})\n\n" + post_content
 
-        post_to_facebook(content)
-        post_to_telegram(content)
+    post_to_facebook(post_content)
+    post_to_telegram(post_content)
+
+    save_used_topic(proverb_obj['proverb'])
 
 if __name__ == "__main__":
     run_pipeline()
