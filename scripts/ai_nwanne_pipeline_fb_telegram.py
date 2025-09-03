@@ -75,6 +75,8 @@ def fetch_random_proverb():
 
 def escape_markdown(text):
     """Escape characters for Telegram MarkdownV2"""
+    if not text:
+        return ""
     escape_chars = r"_*[]()~`>#+-=|{}.!$"
     return "".join(f"\\{c}" if c in escape_chars else c for c in text)
 
