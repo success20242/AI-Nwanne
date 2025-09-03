@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # ai_nwanne_pipeline_fb_telegram.py
-# African wisdom daily bot: fetch, generate commentary, handle images, post to FB + Telegram
+# African wisdom daily bot with 7-day rotation
 
 import os
 import json
 import hashlib
 import requests
 import feedparser
+import random
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -16,7 +17,7 @@ load_dotenv()
 # ------------------- CONFIG -------------------
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-USED_TOPICS_FILE = "used_topics.json"
+USED_TOPICS_FILE = "used_topics.json"  # will store {"proverb": "...", "last_posted": "YYYY-MM-DD"}
 MAX_TOPIC_MEMORY = 500
 FIXED_HASHTAGS = ["#AINwanne", "#NaijaCulture", "#AfricanAI"]
 
@@ -37,10 +38,12 @@ CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 # Feed & posting limits
 FEED_HOURS_BACK = int(os.getenv("FEED_HOURS_BACK", 72))
 MAX_POSTS_PER_RUN = int(os.getenv("MAX_POSTS_PER_RUN", 2))
+POST_ROTATION_DAYS = 7
 
-# Wisdom Sources (can be JSON file or RSS feed URLs)
+# Wisdom Sources (multiple RSS feeds)
 WISDOM_FEEDS = [
-    "https://www.afriprov.com/rss",  # placeholder example
+    "https://www.afriprov.com/rss",
+    "https://www.example2.com/rss"
 ]
 
 # ------------------- HELPERS -------------------
@@ -54,12 +57,25 @@ def get_used_topics():
     except Exception:
         return []
 
-def save_used_topic(topic):
+def save_used_topic(proverb):
     topics = get_used_topics()
-    topics.append(topic)
+    today = datetime.utcnow().date().isoformat()
+    # Remove old duplicate if exists
+    topics = [t for t in topics if t["proverb"] != proverb]
+    topics.append({"proverb": proverb, "last_posted": today})
     topics = topics[-MAX_TOPIC_MEMORY:]
     with open(USED_TOPICS_FILE, "w") as f:
         json.dump(topics, f, indent=2)
+
+def was_posted_recently(proverb):
+    topics = get_used_topics()
+    cutoff_date = datetime.utcnow().date() - timedelta(days=POST_ROTATION_DAYS)
+    for t in topics:
+        if t["proverb"] == proverb:
+            last_posted = datetime.fromisoformat(t["last_posted"]).date()
+            if last_posted >= cutoff_date:
+                return True
+    return False
 
 def hash_text(text):
     return hashlib.md5(text.encode()).hexdigest()
@@ -84,11 +100,11 @@ def fetch_wisdom_from_feeds():
 
                 if title:
                     entries.append({"title": title, "summary": summary, "link": link})
-
         except Exception as e:
             print(f"[WARN] Failed to parse feed {feed_url}: {e}")
 
-    return entries[:MAX_POSTS_PER_RUN]
+    random.shuffle(entries)
+    return entries
 
 # ------------------- OPENAI -------------------
 
@@ -96,7 +112,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 def generate_wisdom_content(title="", summary="", link=""):
     used_topics = get_used_topics()
-    last_100 = used_topics[-100:]
+    last_100 = [t["proverb"] for t in used_topics[-100:]]
 
     prompt = f"""
 You are an African culture and heritage writer.
@@ -108,7 +124,7 @@ Summary: {summary}
 Link: {link}
 
 2. Produce a short explanation (1-2 sentences).
-3. Produce a structured commentary (HTML <ul><li>...</li></ul>) with cultural insights, usage, or tips.
+3. Produce a structured commentary (use dashes "-" for bullets) with cultural insights, usage, or tips.
 4. Avoid repeating proverbs used in the last 100 posts:
 {chr(10).join(last_100)}
 
@@ -122,7 +138,9 @@ Output Format:
 Proverb: "..."
 Explanation: ...
 Commentary:
-<ul><li>...</li></ul>
+- ...
+- ...
+- ...
 ---
 """
     response = client.chat.completions.create(
@@ -176,7 +194,7 @@ def post_to_telegram(content):
     payload = {
         "chat_id": TG_CHAT_ID,
         "text": content,
-        "parse_mode": "HTML",
+        "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True
     }
     resp = requests.post(url, json=payload)
@@ -187,32 +205,63 @@ def post_to_telegram(content):
         print(f"❌ Telegram error: {resp.text}")
         return None
 
-# ------------------- MAIN -------------------
+# ------------------- MAIN PIPELINE -------------------
 
 def run_pipeline():
     wisdom_entries = fetch_wisdom_from_feeds()
-
-    # If no feed entries, generate fallback posts up to MAX_POSTS_PER_RUN
     if not wisdom_entries:
         wisdom_entries = [{"title": "", "summary": "", "link": ""} for _ in range(MAX_POSTS_PER_RUN)]
 
-    # Ensure only MAX_POSTS_PER_RUN posts are processed
-    for entry in wisdom_entries[:MAX_POSTS_PER_RUN]:
+    posted_hashes = set()
+    posts_done = 0
+
+    for entry in wisdom_entries:
+        if posts_done >= MAX_POSTS_PER_RUN:
+            break
         try:
             content = generate_wisdom_content(entry["title"], entry["summary"], entry["link"])
 
+            # Extract proverb to check rotation
+            import re
+            match = re.search(r'Proverb:\s*["“](.+?)["”]', content)
+            proverb = match.group(1) if match else None
+            if not proverb or was_posted_recently(proverb):
+                continue
+
+            # Avoid duplicate posts in same run
+            content_hash = hash_text(content)
+            if content_hash in posted_hashes:
+                continue
+            posted_hashes.add(content_hash)
+
             # Optional image
-            img_html = ""
+            img_text = ""
             if USE_IMAGE and entry.get("link"):
                 cloud_img = upload_image_to_cloudinary(entry["link"])
                 if cloud_img:
-                    img_html = f'<img src="{cloud_img}" alt="African Wisdom" style="max-width:100%;">'
+                    img_text = f'[Image]({cloud_img})\n\n'
 
-            social_post = content + "\n\n" + " ".join(FIXED_HASHTAGS)
+            # Split content into sections
+            lines = content.splitlines()
+            proverb_line = next((l for l in lines if l.startswith("Proverb:")), "")
+            explanation_line = next((l for l in lines if l.startswith("Explanation:")), "")
+            commentary_lines = [l for l in lines if l.startswith("-")]
 
-            # Post to platforms
-            post_to_facebook(social_post)
-            post_to_telegram(social_post)
+            # Facebook post
+            fb_post = "\n".join([proverb_line, explanation_line, ""] + commentary_lines + ["", " ".join(FIXED_HASHTAGS)])
+            if img_text:
+                fb_post = img_text + fb_post
+
+            # Telegram post (MarkdownV2 safe)
+            tg_post = fb_post
+            for ch in r"_*[]()~`>#+-=|{}.!":
+                tg_post = tg_post.replace(ch, f"\\{ch}")
+
+            # Post
+            post_to_facebook(fb_post)
+            post_to_telegram(tg_post)
+
+            posts_done += 1
 
         except Exception as e:
             print(f"[ERROR] Pipeline failed for entry {entry}: {e}")
